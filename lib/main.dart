@@ -111,15 +111,76 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-class ShoppingPage extends StatelessWidget {
+class ShoppingPage extends StatefulWidget {
   const ShoppingPage({super.key});
+
+  @override
+  State<ShoppingPage> createState() => _ShoppingPageState();
+}
+
+class _ShoppingPageState extends State<ShoppingPage> {
+  final TextEditingController _controller = TextEditingController();
+
+  final List<String> _shoppingItems = [];
+
+  void _addItem() {
+    final item = _controller.text.trim();
+
+    if (item.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _shoppingItems.add(item);
+    });
+
+    _controller.clear();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Einkaufen')),
-      body: const Center(
-        child: Text('Unsere Einkaufsliste', style: TextStyle(fontSize: 24)),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: const InputDecoration(
+                      labelText: 'Was brauchen wir?',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _addItem(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _addItem,
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Hinzufügen',
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            Expanded(
+              child: ListView.builder(
+                itemCount: _shoppingItems.length,
+                itemBuilder: (context, index) {
+                  return ListTile(
+                    leading: const Icon(Icons.shopping_cart),
+                    title: Text(_shoppingItems[index]),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
