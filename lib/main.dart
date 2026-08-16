@@ -57,39 +57,46 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
+      appBar: AppBar(title: Text(widget.title)),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
             const Text(
               'Willkommen in unserer WG!',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
-
             const SizedBox(height: 24),
-
             Card(
-              child: ListTile(
-                leading: const Icon(Icons.shopping_cart),
-                title: const Text('Einkaufen'),
-                subtitle: const Text('0 offene Artikel'),
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => ShoppingPage()),
+                  );
+                },
+                child: const ListTile(
+                  leading: Icon(Icons.shopping_cart),
+                  title: Text('Einkaufen'),
+                  subtitle: Text('0 offene Artikel'),
+                ),
               ),
             ),
-
             Card(
-              child: ListTile(
-                leading: const Icon(Icons.check_circle),
-                title: const Text('Aufgaben'),
-                subtitle: const Text('0 offene Aufgaben'),
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => TaskList()),
+                  );
+                },
+                child: const ListTile(
+                  leading: Icon(Icons.check_circle),
+                  title: Text('Aufgaben'),
+                  subtitle: Text('0 offene Aufgaben'),
+                ),
               ),
             ),
-
             Card(
               child: ListTile(
                 leading: const Icon(Icons.chat),
@@ -99,6 +106,34 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class ShoppingPage extends StatelessWidget {
+  const ShoppingPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Einkaufen')),
+      body: const Center(
+        child: Text('Unsere Einkaufsliste', style: TextStyle(fontSize: 24)),
+      ),
+    );
+  }
+}
+
+class TaskList extends StatelessWidget {
+  const TaskList({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Aufgaben')),
+      body: const Center(
+        child: Text('Offene Aufgaben', style: TextStyle(fontSize: 24)),
       ),
     );
   }
