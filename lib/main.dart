@@ -121,7 +121,7 @@ class ShoppingPage extends StatefulWidget {
 class _ShoppingPageState extends State<ShoppingPage> {
   final TextEditingController _controller = TextEditingController();
 
-  final List<String> _shoppingItems = [];
+  final List<Map<String, dynamic>> _shoppingItems = [];
 
   void _addItem() {
     final item = _controller.text.trim();
@@ -131,7 +131,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
     }
 
     setState(() {
-      _shoppingItems.add(item);
+      _shoppingItems.add({'name': item, 'completed': false, 'quantity': 1});
     });
 
     _controller.clear();
@@ -172,9 +172,70 @@ class _ShoppingPageState extends State<ShoppingPage> {
               child: ListView.builder(
                 itemCount: _shoppingItems.length,
                 itemBuilder: (context, index) {
+                  final item = _shoppingItems[index];
+
                   return ListTile(
-                    leading: const Icon(Icons.shopping_cart),
-                    title: Text(_shoppingItems[index]),
+                    leading: Checkbox(
+                      value: item['completed'],
+                      onChanged: (value) {
+                        setState(() {
+                          item['completed'] = value;
+                        });
+                      },
+                    ),
+
+                    title: Text(
+                      item['name'],
+                      style: TextStyle(
+                        decoration: item['completed']
+                            ? TextDecoration.lineThrough
+                            : TextDecoration.none,
+                      ),
+                    ),
+
+                    subtitle: Row(
+                      children: [
+                        IconButton(
+                          onPressed: item['quantity'] > 1
+                              ? () {
+                                  setState(() {
+                                    item['quantity']--;
+                                  });
+                                }
+                              : null,
+                          icon: const Icon(Icons.remove),
+                          tooltip: 'Weniger',
+                        ),
+
+                        Text(
+                          '${item['quantity']}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+
+                        IconButton(
+                          onPressed: () {
+                            setState(() {
+                              item['quantity']++;
+                            });
+                          },
+                          icon: const Icon(Icons.add),
+                          tooltip: 'Mehr',
+                        ),
+                      ],
+                    ),
+
+                    trailing: IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _shoppingItems.removeAt(index);
+                        });
+                      },
+                      icon: const Icon(Icons.delete),
+                      tooltip: 'Löschen',
+                    ),
                   );
                 },
               ),
