@@ -20,7 +20,7 @@ class _TaskPageState extends State<TaskPage> {
     }
 
     setState(() {
-      _tasks.add({'name': task, 'completed': false});
+      _tasks.add({'name': task, 'completed': false, 'assignedTo': null});
     });
 
     _controller.clear();

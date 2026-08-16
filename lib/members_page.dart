@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'wg_data.dart';
+
 class MembersPage extends StatefulWidget {
   const MembersPage({super.key});
 
@@ -10,8 +12,6 @@ class MembersPage extends StatefulWidget {
 class _MembersPageState extends State<MembersPage> {
   final TextEditingController _controller = TextEditingController();
 
-  final List<String> _members = [];
-
   void _addMember() {
     final name = _controller.text.trim();
 
@@ -19,12 +19,17 @@ class _MembersPageState extends State<MembersPage> {
       return;
     }
 
-    if (_members.contains(name)) {
+    if (WGData.members.any((member) => member.name == name)) {
       return;
     }
 
     setState(() {
-      _members.add(name);
+      WGData.members.add(
+        WGMember(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          name: name,
+        ),
+      );
     });
 
     _controller.clear();
@@ -52,7 +57,7 @@ class _MembersPageState extends State<MembersPage> {
             const SizedBox(height: 16),
 
             Expanded(
-              child: _members.isEmpty
+              child: WGData.members.isEmpty
                   ? Center(
                       child: Text(
                         'Noch keine Bewohner hinzugefügt',
@@ -62,9 +67,9 @@ class _MembersPageState extends State<MembersPage> {
                       ),
                     )
                   : ListView.builder(
-                      itemCount: _members.length,
+                      itemCount: WGData.members.length,
                       itemBuilder: (context, index) {
-                        final member = _members[index];
+                        final member = WGData.members[index];
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -72,13 +77,13 @@ class _MembersPageState extends State<MembersPage> {
                             leading: const CircleAvatar(
                               child: Icon(Icons.person),
                             ),
-                            title: Text(member),
+                            title: Text(member.name),
                             trailing: IconButton(
                               icon: const Icon(Icons.delete_outline),
                               tooltip: 'Löschen',
                               onPressed: () {
                                 setState(() {
-                                  _members.removeAt(index);
+                                  WGData.members.removeAt(index);
                                 });
                               },
                             ),
