@@ -20,7 +20,12 @@ class _ShoppingPageState extends State<ShoppingPage> {
     }
 
     setState(() {
-      _shoppingItems.add({'name': item, 'completed': false, 'quantity': 1});
+      _shoppingItems.add({
+        'name': item,
+        'completed': false,
+        'quantity': 1,
+        'claimed': false,
+      });
     });
 
     _controller.clear();
@@ -66,8 +71,14 @@ class _ShoppingPageState extends State<ShoppingPage> {
                   final item = _shoppingItems[index];
                   final completed = item['completed'] as bool;
                   final quantity = item['quantity'] as int;
-
+                  final claimed = item['claimed'] ?? false;
+                  final cardColor = completed
+                      ? Colors.green.withValues(alpha: 0.15)
+                      : claimed
+                      ? Colors.amber.withValues(alpha: 0.15)
+                      : null;
                   return Card(
+                    color: cardColor,
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -145,6 +156,27 @@ class _ShoppingPageState extends State<ShoppingPage> {
                                       tooltip: 'Mehr',
                                     ),
                                   ],
+                                ),
+                                TextButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      item['claimed'] = !claimed;
+                                    });
+                                  },
+                                  style: claimed
+                                      ? TextButton.styleFrom(
+                                          foregroundColor: Colors.amber,
+                                        )
+                                      : null,
+                                  icon: Icon(
+                                    claimed
+                                        ? Icons.lock_outline
+                                        : Icons.shopping_bag_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    claimed ? 'Reserviert' : 'Ich kaufe das',
+                                  ),
                                 ),
                               ],
                             ),
