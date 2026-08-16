@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'shopping_page.dart';
 import 'task_page.dart';
+import 'members_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -144,7 +145,12 @@ class HomePage extends StatelessWidget {
                     child: InkWell(
                       borderRadius: BorderRadius.circular(18),
                       onTap: () {
-                        // WG-Einstellungen kommen später.
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const MembersPage(),
+                          ),
+                        );
                       },
                       child: const Padding(
                         padding: EdgeInsets.all(16),
