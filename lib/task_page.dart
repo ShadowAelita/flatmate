@@ -248,6 +248,17 @@ class _TaskPageState extends State<TaskPage> {
                                                     ? Icons.person_outline
                                                     : Icons.person,
                                                 size: 18,
+                                                color: assignedMember == null
+                                                    ? Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant
+                                                    : WGData.memberColor(
+                                                        WGData.members.firstWhere(
+                                                          (member) =>
+                                                              member.id ==
+                                                              task['assignedTo'],
+                                                        ),
+                                                      ),
                                               ),
                                               const SizedBox(width: 6),
                                               Text(

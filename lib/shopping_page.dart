@@ -288,6 +288,15 @@ class _ShoppingPageState extends State<ShoppingPage> {
                                         ? Icons.lock_outline
                                         : Icons.shopping_bag_outlined,
                                     size: 18,
+                                    color: claimed
+                                        ? WGData.memberColor(
+                                            WGData.members.firstWhere(
+                                              (member) =>
+                                                  member.id ==
+                                                  item['claimedBy'],
+                                            ),
+                                          )
+                                        : null,
                                   ),
                                   label: Text(
                                     claimed
