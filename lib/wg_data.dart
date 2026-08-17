@@ -113,6 +113,14 @@ class WGData {
     return members.length;
   }
 
+  static Map<String, dynamic>? get latestChatMessage {
+    if (chatMessages.isEmpty) {
+      return null;
+    }
+
+    return chatMessages.last;
+  }
+
   static Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     bool tasksChanged = false;

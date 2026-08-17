@@ -527,14 +527,31 @@ class _ChatPageState extends State<ChatPage> {
 
                                   const SizedBox(height: 4),
 
-                                  Text(
-                                    _formatTime(message['timestamp']),
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _formatTime(message['timestamp']),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                      ),
+                                      if (message['edited'] == true) ...[
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '· bearbeitet',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ],
                               ),

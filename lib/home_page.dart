@@ -286,7 +286,7 @@ class HomePage extends StatelessWidget {
                               ),
                             );
                           },
-                          child: const Padding(
+                          child: Padding(
                             padding: EdgeInsets.all(16),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -305,7 +305,40 @@ class HomePage extends StatelessWidget {
 
                                 SizedBox(height: 6),
 
-                                Text('Keine neuen Nachrichten'),
+                                Builder(
+                                  builder: (context) {
+                                    final message = WGData.latestChatMessage;
+
+                                    if (message == null) {
+                                      return const Text('Keine Nachrichten');
+                                    }
+
+                                    final senderId = message['senderId'];
+
+                                    WGMember? sender;
+
+                                    for (final member in WGData.members) {
+                                      if (member.id == senderId) {
+                                        sender = member;
+                                        break;
+                                      }
+                                    }
+
+                                    if (sender == null) {
+                                      return const Text('Neue Nachricht');
+                                    }
+
+                                    final text = message['text'] as String;
+                                    final edited = message['edited'] == true;
+
+                                    return Text(
+                                      '${sender.name}: $text${edited ? ' · bearbeitet' : ''}',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                    );
+                                  },
+                                ),
                               ],
                             ),
                           ),
