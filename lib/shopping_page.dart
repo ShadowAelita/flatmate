@@ -12,7 +12,7 @@ class ShoppingPage extends StatefulWidget {
 class _ShoppingPageState extends State<ShoppingPage> {
   final TextEditingController _controller = TextEditingController();
 
-  void _addItem() {
+  Future<void> _addItem() async {
     final item = _controller.text.trim();
 
     if (item.isEmpty) {
@@ -29,6 +29,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
     });
 
     _controller.clear();
+    await WGData.save();
   }
 
   String? _getClaimedMemberName(Map<String, dynamic> item) {
@@ -101,12 +102,16 @@ class _ShoppingPageState extends State<ShoppingPage> {
                     trailing: item['claimedBy'] == member.id
                         ? const Icon(Icons.check)
                         : null,
-                    onTap: () {
+                    onTap: () async {
                       setState(() {
                         item['claimedBy'] = member.id;
                       });
 
-                      Navigator.pop(context);
+                      await WGData.save();
+
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                      }
                     },
                   ),
                 ),
@@ -114,12 +119,16 @@ class _ShoppingPageState extends State<ShoppingPage> {
                 ListTile(
                   leading: const Icon(Icons.remove_circle_outline),
                   title: const Text('Reservierung aufheben'),
-                  onTap: () {
+                  onTap: () async {
                     setState(() {
                       item['claimedBy'] = null;
                     });
 
-                    Navigator.pop(context);
+                    await WGData.save();
+
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
                   },
                 ),
               ],
@@ -190,10 +199,12 @@ class _ShoppingPageState extends State<ShoppingPage> {
                         children: [
                           Checkbox(
                             value: completed,
-                            onChanged: (value) {
+                            onChanged: (value) async {
                               setState(() {
                                 item['completed'] = value ?? false;
                               });
+
+                              await WGData.save();
                             },
                           ),
 
@@ -224,10 +235,12 @@ class _ShoppingPageState extends State<ShoppingPage> {
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
                                       onPressed: quantity > 1
-                                          ? () {
+                                          ? () async {
                                               setState(() {
                                                 item['quantity']--;
                                               });
+
+                                              await WGData.save();
                                             }
                                           : null,
                                       icon: const Icon(Icons.remove),
@@ -248,10 +261,12 @@ class _ShoppingPageState extends State<ShoppingPage> {
 
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      onPressed: () {
+                                      onPressed: () async {
                                         setState(() {
                                           item['quantity']++;
                                         });
+
+                                        await WGData.save();
                                       },
                                       icon: const Icon(Icons.add),
                                       tooltip: 'Mehr',
@@ -284,10 +299,12 @@ class _ShoppingPageState extends State<ShoppingPage> {
                           ),
 
                           IconButton(
-                            onPressed: () {
+                            onPressed: () async {
                               setState(() {
                                 WGData.shoppingItems.removeAt(index);
                               });
+
+                              await WGData.save();
                             },
                             icon: const Icon(Icons.delete_outline),
                             tooltip: 'Löschen',
