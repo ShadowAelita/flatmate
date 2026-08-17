@@ -12,8 +12,6 @@ class TaskPage extends StatefulWidget {
 class _TaskPageState extends State<TaskPage> {
   final TextEditingController _controller = TextEditingController();
 
-  final List<Map<String, dynamic>> _tasks = [];
-
   void _addTask() {
     final task = _controller.text.trim();
 
@@ -22,7 +20,7 @@ class _TaskPageState extends State<TaskPage> {
     }
 
     setState(() {
-      _tasks.add({'name': task, 'completed': false, 'assignedTo': null});
+      WGData.tasks.add({'name': task, 'completed': false, 'assignedTo': null});
     });
 
     _controller.clear();
@@ -140,7 +138,7 @@ class _TaskPageState extends State<TaskPage> {
             const SizedBox(height: 16),
 
             Expanded(
-              child: _tasks.isEmpty
+              child: WGData.tasks.isEmpty
                   ? Center(
                       child: Text(
                         'Keine offenen Aufgaben',
@@ -151,9 +149,9 @@ class _TaskPageState extends State<TaskPage> {
                       ),
                     )
                   : ListView.builder(
-                      itemCount: _tasks.length,
+                      itemCount: WGData.tasks.length,
                       itemBuilder: (context, index) {
-                        final task = _tasks[index];
+                        final task = WGData.tasks[index];
                         final completed = task['completed'] as bool;
                         final assignedMember = _getAssignedMemberName(task);
 
@@ -243,7 +241,7 @@ class _TaskPageState extends State<TaskPage> {
                                 IconButton(
                                   onPressed: () {
                                     setState(() {
-                                      _tasks.removeAt(index);
+                                      WGData.tasks.removeAt(index);
                                     });
                                   },
                                   icon: const Icon(Icons.delete_outline),

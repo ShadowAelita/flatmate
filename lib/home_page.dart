@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'shopping_page.dart';
 import 'task_page.dart';
 import 'members_page.dart';
+import 'wg_data.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final currentMember = WGData.currentMember;
     return Scaffold(
       appBar: AppBar(title: const Text('Unsere WG')),
       body: Padding(
@@ -16,15 +18,27 @@ class HomePage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'NEW HOME PAGE 123',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            Text(
+              currentMember == null
+                  ? 'Guten Abend'
+                  : 'Guten Abend ${currentMember.name}',
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
             ),
 
             const SizedBox(height: 8),
 
             Text(
-              'Test in unserer WG!',
+              currentMember == null ? 'Willkommen in unserer WG!' : '',
+              style: TextStyle(
+                fontSize: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              'Wer das liest ist gay',
               style: TextStyle(
                 fontSize: 16,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -89,7 +103,7 @@ class HomePage extends StatelessWidget {
                           ),
                         );
                       },
-                      child: const Padding(
+                      child: Padding(
                         padding: EdgeInsets.all(16),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -104,7 +118,13 @@ class HomePage extends StatelessWidget {
                               ),
                             ),
                             SizedBox(height: 6),
-                            Text('0 offene Aufgaben'),
+                            Text(
+                              WGData.currentMember == null
+                                  ? 'Keine Person ausgewählt'
+                                  : WGData.currentMemberTaskCount == 0
+                                  ? 'Alles erledigt ✓'
+                                  : '${WGData.currentMemberTaskCount} für dich',
+                            ),
                           ],
                         ),
                       ),
