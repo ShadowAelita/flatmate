@@ -66,12 +66,103 @@ class _ChatPageState extends State<ChatPage> {
     return '$hour:$minute';
   }
 
-  void _showMessageActions(
+  Future<void> _editMessage(Map<String, dynamic> message) async {
+    final controller = TextEditingController(text: message['text'] as String);
+
+    final editedText = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Nachricht bearbeiten'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 5,
+            minLines: 1,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'Nachricht',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final text = controller.text.trim();
+
+                if (text.isEmpty) {
+                  return;
+                }
+
+                Navigator.pop(context, text);
+              },
+              child: const Text('Speichern'),
+            ),
+          ],
+        );
+      },
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+    });
+
+    if (editedText == null || editedText.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      message['text'] = editedText;
+      message['edited'] = true;
+    });
+
+    await WGData.save();
+  }
+
+  Future<void> _deleteMessage(Map<String, dynamic> message) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Nachricht löschen?'),
+          content: const Text('Diese Nachricht wird dauerhaft gelöscht.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Löschen'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      WGData.chatMessages.removeWhere(
+        (existingMessage) => existingMessage['id'] == message['id'],
+      );
+    });
+
+    await WGData.save();
+  }
+
+  Future<void> _showMessageActions(
     Map<String, dynamic> message,
     WGMember sender,
     bool isCurrentMember,
-  ) {
-    showModalBottomSheet(
+  ) async {
+    final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) {
@@ -84,7 +175,7 @@ class _ChatPageState extends State<ChatPage> {
                   leading: const Icon(Icons.edit_outlined),
                   title: const Text('Bearbeiten'),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(context, 'edit');
                   },
                 ),
 
@@ -92,7 +183,7 @@ class _ChatPageState extends State<ChatPage> {
                 leading: const Icon(Icons.reply_outlined),
                 title: const Text('Antworten'),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(context, 'reply');
                 },
               ),
 
@@ -100,43 +191,8 @@ class _ChatPageState extends State<ChatPage> {
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
                   title: const Text('Löschen'),
-                  onTap: () async {
-                    Navigator.pop(context);
-
-                    final shouldDelete = await showDialog<bool>(
-                      context: context,
-                      builder: (context) {
-                        return AlertDialog(
-                          title: const Text('Nachricht löschen?'),
-                          content: const Text(
-                            'Diese Nachricht wird dauerhaft gelöscht.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('Abbrechen'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Löschen'),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-
-                    if (shouldDelete != true) {
-                      return;
-                    }
-
-                    setState(() {
-                      WGData.chatMessages.removeWhere(
-                        (existingMessage) =>
-                            existingMessage['id'] == message['id'],
-                      );
-                    });
-
-                    await WGData.save();
+                  onTap: () {
+                    Navigator.pop(context, 'delete');
                   },
                 ),
             ],
@@ -144,6 +200,18 @@ class _ChatPageState extends State<ChatPage> {
         );
       },
     );
+
+    if (!mounted || action == null) {
+      return;
+    }
+
+    if (action == 'edit') {
+      await _editMessage(message);
+    } else if (action == 'delete') {
+      await _deleteMessage(message);
+    } else if (action == 'reply') {
+      // Reply will be implemented next.
+    }
   }
 
   @override
@@ -195,8 +263,10 @@ class _ChatPageState extends State<ChatPage> {
                       }
 
                       final isCurrentMember = currentMember?.id == sender.id;
+
                       final bubbleColor = WGData.memberColor(sender)
                           .withValues(alpha: 0.20);
+
                       return GestureDetector(
                         onLongPress: () {
                           _showMessageActions(message, sender, isCurrentMember);
