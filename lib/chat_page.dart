@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'wg_data.dart';
@@ -13,6 +15,12 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  final Map<String, GlobalKey> _messageKeys = {};
+
+  Map<String, dynamic>? _replyingTo;
+  String? _highlightedMessageId;
+  Timer? _highlightTimer;
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     final member = WGData.currentMember;
@@ -27,7 +35,11 @@ class _ChatPageState extends State<ChatPage> {
         'text': text,
         'senderId': member.id,
         'timestamp': DateTime.now().toIso8601String(),
+        'edited': false,
+        'replyTo': _replyingTo?['id'],
       });
+
+      _replyingTo = null;
     });
 
     _controller.clear();
@@ -64,6 +76,46 @@ class _ChatPageState extends State<ChatPage> {
     final minute = dateTime.minute.toString().padLeft(2, '0');
 
     return '$hour:$minute';
+  }
+
+  GlobalKey _getMessageKey(String messageId) {
+    return _messageKeys.putIfAbsent(messageId, () => GlobalKey());
+  }
+
+  Future<void> _scrollToMessage(String messageId) async {
+    final key = _getMessageKey(messageId);
+    final targetContext = key.currentContext;
+
+    if (targetContext == null) {
+      return;
+    }
+
+    await Scrollable.ensureVisible(
+      targetContext,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+      alignment: 0.5,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    _highlightTimer?.cancel();
+
+    setState(() {
+      _highlightedMessageId = messageId;
+    });
+
+    _highlightTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _highlightedMessageId = null;
+      });
+    });
   }
 
   Future<void> _editMessage(Map<String, dynamic> message) async {
@@ -178,7 +230,6 @@ class _ChatPageState extends State<ChatPage> {
                     Navigator.pop(context, 'edit');
                   },
                 ),
-
               ListTile(
                 leading: const Icon(Icons.reply_outlined),
                 title: const Text('Antworten'),
@@ -186,7 +237,6 @@ class _ChatPageState extends State<ChatPage> {
                   Navigator.pop(context, 'reply');
                 },
               ),
-
               if (isCurrentMember)
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
@@ -210,7 +260,9 @@ class _ChatPageState extends State<ChatPage> {
     } else if (action == 'delete') {
       await _deleteMessage(message);
     } else if (action == 'reply') {
-      // Reply will be implemented next.
+      setState(() {
+        _replyingTo = message;
+      });
     }
   }
 
@@ -227,9 +279,135 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Widget _buildMessageReplyPreview(Map<String, dynamic> message) {
+    final replyToId = message['replyTo'];
+
+    if (replyToId == null) {
+      return const SizedBox.shrink();
+    }
+
+    Map<String, dynamic>? originalMessage;
+
+    for (final existingMessage in WGData.chatMessages) {
+      if (existingMessage['id'] == replyToId) {
+        originalMessage = existingMessage;
+        break;
+      }
+    }
+
+    if (originalMessage == null) {
+      return const SizedBox.shrink();
+    }
+
+    final originalSender = _getSender(originalMessage['senderId']);
+
+    if (originalSender == null) {
+      return const SizedBox.shrink();
+    }
+
+    return GestureDetector(
+      onTap: () {
+        _scrollToMessage(originalMessage!['id']);
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.45),
+          border: Border(
+            left: BorderSide(
+              color: WGData.memberColor(originalSender),
+              width: 3,
+            ),
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              originalSender.name,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: WGData.memberColor(originalSender),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              originalMessage['text'] as String,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReplyPreview() {
+    final message = _replyingTo;
+
+    if (message == null) {
+      return const SizedBox.shrink();
+    }
+
+    final sender = _getSender(message['senderId']);
+
+    if (sender == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        border: Border(
+          left: BorderSide(color: WGData.memberColor(sender), width: 4),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Antwort auf ${sender.name}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message['text'] as String,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _replyingTo = null;
+              });
+            },
+            icon: const Icon(Icons.close),
+            tooltip: 'Antwort abbrechen',
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -264,77 +442,102 @@ class _ChatPageState extends State<ChatPage> {
 
                       final isCurrentMember = currentMember?.id == sender.id;
 
+                      final isHighlighted =
+                          _highlightedMessageId == message['id'];
+
                       final bubbleColor = WGData.memberColor(sender)
                           .withValues(alpha: 0.20);
 
-                      return GestureDetector(
-                        onLongPress: () {
-                          _showMessageActions(message, sender, isCurrentMember);
-                        },
-                        child: Align(
-                          alignment: isCurrentMember
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            constraints: BoxConstraints(
-                              maxWidth:
-                                  MediaQuery.of(context).size.width * 0.75,
-                            ),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: bubbleColor,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: isCurrentMember
-                                  ? CrossAxisAlignment.end
-                                  : CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 14,
-                                      backgroundColor: WGData.memberColor(
-                                        sender,
+                      return Container(
+                        key: _getMessageKey(message['id']),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: GestureDetector(
+                          onLongPress: () {
+                            _showMessageActions(
+                              message,
+                              sender,
+                              isCurrentMember,
+                            );
+                          },
+                          child: Align(
+                            alignment: isCurrentMember
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    MediaQuery.of(context).size.width * 0.75,
+                              ),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isHighlighted
+                                    ? WGData.memberColor(sender)
+                                          .withValues(alpha: 0.45)
+                                    : bubbleColor,
+                                borderRadius: BorderRadius.circular(16),
+                                border: isHighlighted
+                                    ? Border.all(
+                                        color: WGData.memberColor(sender),
+                                        width: 2,
+                                      )
+                                    : null,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: isCurrentMember
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 14,
+                                        backgroundColor: WGData.memberColor(
+                                          sender,
+                                        ),
+                                        child: Text(
+                                          sender.name.isNotEmpty
+                                              ? sender.name[0].toUpperCase()
+                                              : '?',
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
                                       ),
-                                      child: Text(
-                                        sender.name.isNotEmpty
-                                            ? sender.name[0].toUpperCase()
-                                            : '?',
-                                        style: const TextStyle(fontSize: 12),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        sender.name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      sender.name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 6),
-
-                                Text(
-                                  message['text'],
-                                  style: const TextStyle(fontSize: 16),
-                                ),
-
-                                const SizedBox(height: 4),
-
-                                Text(
-                                  _formatTime(message['timestamp']),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
+                                    ],
                                   ),
-                                ),
-                              ],
+
+                                  const SizedBox(height: 6),
+
+                                  if (message['replyTo'] != null) ...[
+                                    _buildMessageReplyPreview(message),
+                                    const SizedBox(height: 8),
+                                  ],
+
+                                  Text(
+                                    message['text'],
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+
+                                  const SizedBox(height: 4),
+
+                                  Text(
+                                    _formatTime(message['timestamp']),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -357,34 +560,43 @@ class _ChatPageState extends State<ChatPage> {
             )
           else
             SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        textInputAction: TextInputAction.send,
-                        decoration: const InputDecoration(
-                          hintText: 'Nachricht schreiben...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.all(Radius.circular(24)),
-                          ),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_replyingTo != null) _buildReplyPreview(),
+
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _controller,
+                            textInputAction: TextInputAction.send,
+                            decoration: const InputDecoration(
+                              hintText: 'Nachricht schreiben...',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.all(
+                                  Radius.circular(24),
+                                ),
+                              ),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            onSubmitted: (_) => _sendMessage(),
                           ),
                         ),
-                        onSubmitted: (_) => _sendMessage(),
-                      ),
+                        const SizedBox(width: 8),
+                        IconButton.filled(
+                          onPressed: _sendMessage,
+                          icon: const Icon(Icons.send),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      onPressed: _sendMessage,
-                      icon: const Icon(Icons.send),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
         ],
