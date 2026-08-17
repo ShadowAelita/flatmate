@@ -57,6 +57,7 @@ class WGData {
 
   static Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
+    bool tasksChanged = false;
 
     final savedMembers = prefs.getString('members');
     final savedShoppingItems = prefs.getString('shoppingItems');
@@ -97,12 +98,23 @@ class WGData {
 
       tasks.addAll(
         decodedTasks.map((task) {
-          return Map<String, dynamic>.from(task as Map);
+          final data = Map<String, dynamic>.from(task as Map);
+
+          if (data['id'] == null) {
+            data['id'] = DateTime.now().microsecondsSinceEpoch.toString();
+            tasksChanged = true;
+          }
+
+          return data;
         }),
       );
     }
 
     currentMemberId = savedCurrentMemberId;
+
+    if (tasksChanged) {
+      await save();
+    }
   }
 
   static Future<void> save() async {

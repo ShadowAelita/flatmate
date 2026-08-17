@@ -20,7 +20,12 @@ class _TaskPageState extends State<TaskPage> {
     }
 
     setState(() {
-      WGData.tasks.add({'name': task, 'completed': false, 'assignedTo': null});
+      WGData.tasks.add({
+        'id': DateTime.now().microsecondsSinceEpoch.toString(),
+        'name': task,
+        'completed': false,
+        'assignedTo': null,
+      });
     });
 
     _controller.clear();
@@ -158,8 +163,18 @@ class _TaskPageState extends State<TaskPage> {
                         ),
                       ),
                     )
-                  : ListView.builder(
+                  : ReorderableListView.builder(
                       itemCount: WGData.tasks.length,
+                      onReorder: (oldIndex, newIndex) async {
+                        if (oldIndex < newIndex) {
+                          newIndex -= 1;
+                        }
+
+                        final task = WGData.tasks.removeAt(oldIndex);
+                        WGData.tasks.insert(newIndex, task);
+
+                        await WGData.save();
+                      },
                       itemBuilder: (context, index) {
                         final task = WGData.tasks[index];
                         final completed = task['completed'] as bool;
@@ -170,6 +185,7 @@ class _TaskPageState extends State<TaskPage> {
                             : null;
 
                         return Card(
+                          key: ValueKey(task['id']),
                           color: cardColor,
                           margin: const EdgeInsets.only(bottom: 12),
                           child: Padding(
