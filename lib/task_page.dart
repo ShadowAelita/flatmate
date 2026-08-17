@@ -92,7 +92,10 @@ class _TaskPageState extends State<TaskPage> {
 
                 ...WGData.members.map(
                   (member) => ListTile(
-                    leading: const CircleAvatar(child: Icon(Icons.person)),
+                    leading: CircleAvatar(
+                      backgroundColor: WGData.memberColor(member),
+                      child: const Icon(Icons.person),
+                    ),
                     title: Text(member.name),
                     onTap: () async {
                       setState(() {

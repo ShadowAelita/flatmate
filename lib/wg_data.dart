@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,8 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 class WGMember {
   final String id;
   final String name;
+  final int colorIndex;
 
-  const WGMember({required this.id, required this.name});
+  const WGMember({
+    required this.id,
+    required this.name,
+    required this.colorIndex,
+  });
 }
 
 class WGData {
@@ -16,6 +23,17 @@ class WGData {
   static final List<Map<String, dynamic>> shoppingItems = [];
   static final List<Map<String, dynamic>> tasks = [];
   static final ValueNotifier<int> version = ValueNotifier<int>(0);
+  static const List<Color> memberColors = [
+    Colors.red,
+    Colors.orange,
+    Colors.yellow,
+    Colors.green,
+    Colors.cyan,
+    Colors.purple,
+  ];
+  static Color memberColor(WGMember member) {
+    return memberColors[member.colorIndex % memberColors.length];
+  }
 
   static String? currentMemberId;
 
@@ -114,6 +132,7 @@ class WGData {
           return WGMember(
             id: data['id'] as String,
             name: data['name'] as String,
+            colorIndex: data['colorIndex'] as int? ?? 0,
           );
         }),
       );
@@ -157,7 +176,11 @@ class WGData {
     final prefs = await SharedPreferences.getInstance();
 
     final membersJson = members.map((member) {
-      return {'id': member.id, 'name': member.name};
+      return {
+        'id': member.id,
+        'name': member.name,
+        'colorIndex': member.colorIndex,
+      };
     }).toList();
 
     await prefs.setString('members', jsonEncode(membersJson));

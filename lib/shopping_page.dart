@@ -92,6 +92,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
                 ...WGData.members.map(
                   (member) => ListTile(
                     leading: CircleAvatar(
+                      backgroundColor: WGData.memberColor(member),
                       child: Text(
                         member.name.isNotEmpty
                             ? member.name[0].toUpperCase()

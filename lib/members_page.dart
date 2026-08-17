@@ -37,6 +37,7 @@ class _MembersPageState extends State<MembersPage> {
                 ...WGData.members.map(
                   (member) => ListTile(
                     leading: CircleAvatar(
+                      backgroundColor: WGData.memberColor(member),
                       child: Text(
                         member.name.isNotEmpty
                             ? member.name[0].toUpperCase()
@@ -84,6 +85,7 @@ class _MembersPageState extends State<MembersPage> {
         WGMember(
           id: DateTime.now().microsecondsSinceEpoch.toString(),
           name: name,
+          colorIndex: WGData.members.length % 6,
         ),
       );
     });
@@ -149,8 +151,9 @@ class _MembersPageState extends State<MembersPage> {
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ListTile(
-                            leading: const CircleAvatar(
-                              child: Icon(Icons.person),
+                            leading: CircleAvatar(
+                              backgroundColor: WGData.memberColor(member),
+                              child: const Icon(Icons.person),
                             ),
                             title: Text(member.name),
                             trailing: IconButton(
