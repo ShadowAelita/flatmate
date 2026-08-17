@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 class WGMember {
@@ -13,6 +15,7 @@ class WGData {
   static final List<WGMember> members = [];
   static final List<Map<String, dynamic>> shoppingItems = [];
   static final List<Map<String, dynamic>> tasks = [];
+  static final ValueNotifier<int> version = ValueNotifier<int>(0);
 
   static String? currentMemberId;
 
@@ -110,5 +113,6 @@ class WGData {
     } else {
       await prefs.remove('currentMemberId');
     }
+    version.value++;
   }
 }
