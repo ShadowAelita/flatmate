@@ -51,6 +51,18 @@ class WGData {
     }).length;
   }
 
+  static List<Map<String, dynamic>> get currentMemberTasks {
+    final member = currentMember;
+
+    if (member == null) {
+      return [];
+    }
+
+    return tasks.where((task) {
+      return task['assignedTo'] == member.id && task['completed'] == false;
+    }).toList();
+  }
+
   static int get memberCount {
     return members.length;
   }

@@ -14,7 +14,7 @@ class HomePage extends StatelessWidget {
       valueListenable: WGData.version,
       builder: (context, _, child) {
         final currentMember = WGData.currentMember;
-
+        final currentMemberTasks = WGData.currentMemberTasks.take(3).toList();
         return Scaffold(
           appBar: AppBar(title: const Text('Unsere WG')),
           body: Padding(
@@ -129,13 +129,26 @@ class HomePage extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 6),
-                                Text(
-                                  WGData.currentMember == null
-                                      ? 'Keine Person ausgewählt'
-                                      : WGData.currentMemberTaskCount == 0
-                                      ? 'Alles erledigt ✓'
-                                      : '${WGData.currentMemberTaskCount} für dich',
-                                ),
+                                if (currentMember == null)
+                                  const Text('Keine Person ausgewählt')
+                                else if (currentMemberTasks.isEmpty)
+                                  const Text('Alles erledigt ✓')
+                                else
+                                  Column(
+                                    children: currentMemberTasks.map((task) {
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 4,
+                                        ),
+                                        child: Text(
+                                          '• ${task['name']}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
                               ],
                             ),
                           ),
