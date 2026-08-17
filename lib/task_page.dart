@@ -26,7 +26,6 @@ class _TaskPageState extends State<TaskPage> {
         'completed': false,
         'assignedTo': null,
         'dueDate': null,
-        'dueDate': null,
         'repeat': 'none',
       });
     });
@@ -252,6 +251,80 @@ class _TaskPageState extends State<TaskPage> {
     await WGData.save();
   }
 
+  DateTime? _getNextRepeatDate(dynamic dueDate, String repeat) {
+    if (dueDate == null) {
+      return null;
+    }
+
+    final currentDate = DateTime.tryParse(dueDate as String);
+
+    if (currentDate == null) {
+      return null;
+    }
+
+    switch (repeat) {
+      case 'daily':
+        return currentDate.add(const Duration(days: 1));
+
+      case 'weekly':
+        return currentDate.add(const Duration(days: 7));
+
+      case 'monthly':
+        final nextMonth = currentDate.month == 12
+            ? DateTime(currentDate.year + 1, 1, 1)
+            : DateTime(currentDate.year, currentDate.month + 1, 1);
+
+        final lastDayOfNextMonth = DateTime(
+          nextMonth.year,
+          nextMonth.month + 1,
+          0,
+        ).day;
+
+        final day = currentDate.day > lastDayOfNextMonth
+            ? lastDayOfNextMonth
+            : currentDate.day;
+
+        return DateTime(nextMonth.year, nextMonth.month, day);
+
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _completeTask(Map<String, dynamic> task, bool completed) async {
+    if (!completed) {
+      setState(() {
+        task['completed'] = false;
+      });
+
+      await WGData.save();
+      return;
+    }
+
+    final repeat = task['repeat'] ?? 'none';
+
+    setState(() {
+      task['completed'] = true;
+
+      if (repeat != 'none' && task['dueDate'] != null) {
+        final nextDueDate = _getNextRepeatDate(task['dueDate'], repeat);
+
+        if (nextDueDate != null) {
+          WGData.tasks.add({
+            'id': DateTime.now().microsecondsSinceEpoch.toString(),
+            'name': task['name'],
+            'completed': false,
+            'assignedTo': task['assignedTo'],
+            'dueDate': nextDueDate.toIso8601String(),
+            'repeat': repeat,
+          });
+        }
+      }
+    });
+
+    await WGData.save();
+  }
+
   void _showAssignmentDialog(Map<String, dynamic> task) {
     if (WGData.members.isEmpty) {
       showDialog(
@@ -464,11 +537,7 @@ class _TaskPageState extends State<TaskPage> {
                                 Checkbox(
                                   value: completed,
                                   onChanged: (value) async {
-                                    setState(() {
-                                      task['completed'] = value ?? false;
-                                    });
-
-                                    await WGData.save();
+                                    await _completeTask(task, value ?? false);
                                   },
                                 ),
 
@@ -576,6 +645,7 @@ class _TaskPageState extends State<TaskPage> {
                                           ),
                                         ),
                                       ),
+
                                       const SizedBox(height: 4),
 
                                       // Repeat
