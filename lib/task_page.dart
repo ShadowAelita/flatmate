@@ -611,39 +611,69 @@ class _TaskPageState extends State<TaskPage> {
                                       ),
 
                                       // Due date
-                                      InkWell(
-                                        borderRadius: BorderRadius.circular(8),
-                                        onTap: () => _pickDueDate(task),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 4,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.calendar_today_outlined,
-                                                size: 18,
-                                                color: _dueDateColor(
-                                                  context,
-                                                  task['dueDate'],
-                                                ),
-                                              ),
-
-                                              const SizedBox(width: 6),
-
-                                              Text(
-                                                _formatDueDate(task['dueDate']),
-                                                style: TextStyle(
-                                                  color: _dueDateColor(
-                                                    context,
-                                                    task['dueDate'],
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          InkWell(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            onTap: () => _pickDueDate(task),
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 4,
                                                   ),
-                                                ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons
+                                                        .calendar_today_outlined,
+                                                    size: 18,
+                                                    color: _dueDateColor(
+                                                      context,
+                                                      task['dueDate'],
+                                                    ),
+                                                  ),
+
+                                                  const SizedBox(width: 6),
+
+                                                  Text(
+                                                    _formatDueDate(
+                                                      task['dueDate'],
+                                                    ),
+                                                    style: TextStyle(
+                                                      color: _dueDateColor(
+                                                        context,
+                                                        task['dueDate'],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
+                                            ),
                                           ),
-                                        ),
+
+                                          if (task['dueDate'] != null)
+                                            IconButton(
+                                              onPressed: () async {
+                                                setState(() {
+                                                  task['dueDate'] = null;
+                                                });
+
+                                                await WGData.save();
+                                              },
+                                              icon: const Icon(Icons.close),
+                                              iconSize: 18,
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(
+                                                minWidth: 32,
+                                                minHeight: 32,
+                                              ),
+                                              tooltip: 'Frist entfernen',
+                                            ),
+                                        ],
                                       ),
 
                                       const SizedBox(height: 4),
