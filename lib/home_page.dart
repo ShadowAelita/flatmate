@@ -15,6 +15,9 @@ class HomePage extends StatelessWidget {
       builder: (context, _, child) {
         final currentMember = WGData.currentMember;
         final currentMemberTasks = WGData.currentMemberTasks.take(3).toList();
+        final currentMemberShoppingItems = WGData.currentMemberShoppingItems
+            .take(3)
+            .toList();
         return Scaffold(
           appBar: AppBar(title: const Text('Unsere WG')),
           body: Padding(
@@ -91,10 +94,46 @@ class HomePage extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 6),
-                                Text(
-                                  WGData.openShoppingItemCount == 0
-                                      ? 'Alles eingekauft ✓'
-                                      : '${WGData.openShoppingItemCount} offene Artikel',
+                                Column(
+                                  children: [
+                                    Text(
+                                      WGData.openShoppingItemCount == 0
+                                          ? 'Alles eingekauft ✓'
+                                          : '${WGData.openShoppingItemCount} offene Artikel',
+                                    ),
+
+                                    if (currentMemberShoppingItems
+                                        .isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+
+                                      ...currentMemberShoppingItems.map(
+                                        (item) => Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 3,
+                                          ),
+                                          child: Text(
+                                            '• ${item['name']} × ${item['quantity']}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      ),
+
+                                      if (WGData
+                                              .currentMemberShoppingItemCount >
+                                          3)
+                                        Text(
+                                          '+ ${WGData.currentMemberShoppingItemCount - 3} weitere',
+                                          style: TextStyle(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                    ],
+                                  ],
                                 ),
                               ],
                             ),

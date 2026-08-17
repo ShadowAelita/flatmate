@@ -51,6 +51,30 @@ class WGData {
     }).length;
   }
 
+  static int get currentMemberShoppingItemCount {
+    final member = currentMember;
+
+    if (member == null) {
+      return 0;
+    }
+
+    return shoppingItems.where((item) {
+      return item['claimedBy'] == member.id && item['completed'] == false;
+    }).length;
+  }
+
+  static List<Map<String, dynamic>> get currentMemberShoppingItems {
+    final member = currentMember;
+
+    if (member == null) {
+      return [];
+    }
+
+    return shoppingItems.where((item) {
+      return item['claimedBy'] == member.id && item['completed'] == false;
+    }).toList();
+  }
+
   static List<Map<String, dynamic>> get currentMemberTasks {
     final member = currentMember;
 
