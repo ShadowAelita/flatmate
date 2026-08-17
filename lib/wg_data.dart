@@ -45,6 +45,16 @@ class WGData {
     }).length;
   }
 
+  static int get openShoppingItemCount {
+    return shoppingItems.where((item) {
+      return item['completed'] == false;
+    }).length;
+  }
+
+  static int get memberCount {
+    return members.length;
+  }
+
   static Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
 

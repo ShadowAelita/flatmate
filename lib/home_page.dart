@@ -76,7 +76,7 @@ class HomePage extends StatelessWidget {
                               ),
                             );
                           },
-                          child: const Padding(
+                          child: Padding(
                             padding: EdgeInsets.all(16),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -91,7 +91,11 @@ class HomePage extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 6),
-                                Text('0 offene Artikel'),
+                                Text(
+                                  WGData.openShoppingItemCount == 0
+                                      ? 'Alles eingekauft ✓'
+                                      : '${WGData.openShoppingItemCount} offene Artikel',
+                                ),
                               ],
                             ),
                           ),
@@ -179,7 +183,7 @@ class HomePage extends StatelessWidget {
                               ),
                             );
                           },
-                          child: const Padding(
+                          child: Padding(
                             padding: EdgeInsets.all(16),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -195,7 +199,11 @@ class HomePage extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 6),
-                                Text('Bewohner'),
+                                Text(
+                                  WGData.memberCount == 1
+                                      ? '1 Bewohner'
+                                      : '${WGData.memberCount} Bewohner',
+                                ),
                               ],
                             ),
                           ),
