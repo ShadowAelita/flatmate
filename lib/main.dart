@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'wg_data.dart';
 import 'home_page.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await WGData.initialize();
+
   runApp(const MyApp());
 }
 

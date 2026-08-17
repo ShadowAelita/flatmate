@@ -47,12 +47,16 @@ class _MembersPageState extends State<MembersPage> {
                     trailing: WGData.currentMemberId == member.id
                         ? const Icon(Icons.check)
                         : null,
-                    onTap: () {
+                    onTap: () async {
                       setState(() {
                         WGData.currentMemberId = member.id;
                       });
 
-                      Navigator.pop(context);
+                      await WGData.save();
+
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                      }
                     },
                   ),
                 ),
@@ -64,7 +68,7 @@ class _MembersPageState extends State<MembersPage> {
     );
   }
 
-  void _addMember() {
+  Future<void> _addMember() async {
     final name = _controller.text.trim();
 
     if (name.isEmpty) {
@@ -83,6 +87,10 @@ class _MembersPageState extends State<MembersPage> {
         ),
       );
     });
+
+    _controller.clear();
+
+    await WGData.save();
 
     _controller.clear();
   }
@@ -148,10 +156,18 @@ class _MembersPageState extends State<MembersPage> {
                             trailing: IconButton(
                               icon: const Icon(Icons.delete_outline),
                               tooltip: 'Löschen',
-                              onPressed: () {
+                              onPressed: () async {
+                                final member = WGData.members[index];
+
                                 setState(() {
                                   WGData.members.removeAt(index);
+
+                                  if (WGData.currentMemberId == member.id) {
+                                    WGData.currentMemberId = null;
+                                  }
                                 });
+
+                                await WGData.save();
                               },
                             ),
                           ),
