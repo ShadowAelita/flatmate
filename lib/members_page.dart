@@ -159,6 +159,37 @@ class _MembersPageState extends State<MembersPage> {
                               onPressed: () async {
                                 final member = WGData.members[index];
 
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) {
+                                    return AlertDialog(
+                                      title: const Text('Bewohner löschen?'),
+                                      content: Text(
+                                        'Möchtest du ${member.name} wirklich aus der WG löschen?\n\n'
+                                        'Zugewiesene Aufgaben und Reservierungen werden freigegeben.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(context, false);
+                                          },
+                                          child: const Text('Abbrechen'),
+                                        ),
+                                        FilledButton(
+                                          onPressed: () {
+                                            Navigator.pop(context, true);
+                                          },
+                                          child: const Text('Löschen'),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                );
+
+                                if (confirmed != true) {
+                                  return;
+                                }
+
                                 setState(() {
                                   WGData.members.removeAt(index);
 
