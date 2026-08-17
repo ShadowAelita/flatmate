@@ -220,6 +220,10 @@ class _MembersPageState extends State<MembersPage> {
           item['claimedBy'] = null;
         }
       }
+
+      WGData.chatMessages.removeWhere(
+        (message) => message['senderId'] == member.id,
+      );
     });
 
     await WGData.save();

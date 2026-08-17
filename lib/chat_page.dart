@@ -66,6 +66,97 @@ class _ChatPageState extends State<ChatPage> {
     return '$hour:$minute';
   }
 
+  void _showMessageActions(
+    Map<String, dynamic> message,
+    WGMember sender,
+    bool isCurrentMember,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isCurrentMember)
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined),
+                  title: const Text('Bearbeiten'),
+                  onTap: () {
+                    Navigator.pop(context);
+                  },
+                ),
+
+              ListTile(
+                leading: const Icon(Icons.reply_outlined),
+                title: const Text('Antworten'),
+                onTap: () {
+                  Navigator.pop(context);
+                },
+              ),
+
+              if (isCurrentMember)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: const Text('Löschen'),
+                  onTap: () async {
+                    Navigator.pop(context);
+
+                    final shouldDelete = await showDialog<bool>(
+                      context: context,
+                      builder: (context) {
+                        return AlertDialog(
+                          title: const Text('Nachricht löschen?'),
+                          content: const Text(
+                            'Diese Nachricht wird dauerhaft gelöscht.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Abbrechen'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Löschen'),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+
+                    if (shouldDelete != true) {
+                      return;
+                    }
+
+                    setState(() {
+                      WGData.chatMessages.removeWhere(
+                        (existingMessage) =>
+                            existingMessage['id'] == message['id'],
+                      );
+                    });
+
+                    await WGData.save();
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      }
+    });
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -106,67 +197,75 @@ class _ChatPageState extends State<ChatPage> {
                       final isCurrentMember = currentMember?.id == sender.id;
                       final bubbleColor = WGData.memberColor(sender)
                           .withValues(alpha: 0.20);
-                      return Align(
-                        alignment: isCurrentMember
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.75,
-                          ),
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: bubbleColor,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: isCurrentMember
-                                ? CrossAxisAlignment.end
-                                : CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  CircleAvatar(
-                                    radius: 14,
-                                    backgroundColor: WGData.memberColor(sender),
-                                    child: Text(
-                                      sender.name.isNotEmpty
-                                          ? sender.name[0].toUpperCase()
-                                          : '?',
-                                      style: const TextStyle(fontSize: 12),
+                      return GestureDetector(
+                        onLongPress: () {
+                          _showMessageActions(message, sender, isCurrentMember);
+                        },
+                        child: Align(
+                          alignment: isCurrentMember
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            constraints: BoxConstraints(
+                              maxWidth:
+                                  MediaQuery.of(context).size.width * 0.75,
+                            ),
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: bubbleColor,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: isCurrentMember
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor: WGData.memberColor(
+                                        sender,
+                                      ),
+                                      child: Text(
+                                        sender.name.isNotEmpty
+                                            ? sender.name[0].toUpperCase()
+                                            : '?',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    sender.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      sender.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
-
-                              const SizedBox(height: 6),
-
-                              Text(
-                                message['text'],
-                                style: const TextStyle(fontSize: 16),
-                              ),
-
-                              const SizedBox(height: 4),
-
-                              Text(
-                                _formatTime(message['timestamp']),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
+                                  ],
                                 ),
-                              ),
-                            ],
+
+                                const SizedBox(height: 6),
+
+                                Text(
+                                  message['text'],
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+
+                                const SizedBox(height: 4),
+
+                                Text(
+                                  _formatTime(message['timestamp']),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );
