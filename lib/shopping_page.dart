@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'wg_data.dart';
+
 class ShoppingPage extends StatefulWidget {
   const ShoppingPage({super.key});
 
@@ -10,8 +12,6 @@ class ShoppingPage extends StatefulWidget {
 class _ShoppingPageState extends State<ShoppingPage> {
   final TextEditingController _controller = TextEditingController();
 
-  final List<Map<String, dynamic>> _shoppingItems = [];
-
   void _addItem() {
     final item = _controller.text.trim();
 
@@ -20,15 +20,114 @@ class _ShoppingPageState extends State<ShoppingPage> {
     }
 
     setState(() {
-      _shoppingItems.add({
+      WGData.shoppingItems.add({
         'name': item,
         'completed': false,
         'quantity': 1,
-        'claimed': false,
+        'claimedBy': null,
       });
     });
 
     _controller.clear();
+  }
+
+  String? _getClaimedMemberName(Map<String, dynamic> item) {
+    final claimedBy = item['claimedBy'];
+
+    if (claimedBy == null) {
+      return null;
+    }
+
+    for (final member in WGData.members) {
+      if (member.id == claimedBy) {
+        return member.name;
+      }
+    }
+
+    return null;
+  }
+
+  void _showClaimDialog(Map<String, dynamic> item) {
+    if (WGData.members.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Keine Bewohner'),
+            content: const Text(
+              'Füge zuerst Bewohner unter "Unsere WG" hinzu.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Wer kauft das?',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+
+                const SizedBox(height: 12),
+
+                ...WGData.members.map(
+                  (member) => ListTile(
+                    leading: CircleAvatar(
+                      child: Text(
+                        member.name.isNotEmpty
+                            ? member.name[0].toUpperCase()
+                            : '?',
+                      ),
+                    ),
+                    title: Text(member.name),
+                    trailing: item['claimedBy'] == member.id
+                        ? const Icon(Icons.check)
+                        : null,
+                    onTap: () {
+                      setState(() {
+                        item['claimedBy'] = member.id;
+                      });
+
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
+
+                ListTile(
+                  leading: const Icon(Icons.remove_circle_outline),
+                  title: const Text('Reservierung aufheben'),
+                  onTap: () {
+                    setState(() {
+                      item['claimedBy'] = null;
+                    });
+
+                    Navigator.pop(context);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -66,12 +165,14 @@ class _ShoppingPageState extends State<ShoppingPage> {
 
             Expanded(
               child: ListView.builder(
-                itemCount: _shoppingItems.length,
+                itemCount: WGData.shoppingItems.length,
                 itemBuilder: (context, index) {
-                  final item = _shoppingItems[index];
+                  final item = WGData.shoppingItems[index];
                   final completed = item['completed'] as bool;
                   final quantity = item['quantity'] as int;
-                  final claimed = item['claimed'] ?? false;
+                  final claimedMember = _getClaimedMemberName(item);
+                  final claimed = claimedMember != null;
+
                   final cardColor = completed
                       ? Colors.green.withValues(alpha: 0.15)
                       : claimed
@@ -159,9 +260,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
                                 ),
                                 TextButton.icon(
                                   onPressed: () {
-                                    setState(() {
-                                      item['claimed'] = !claimed;
-                                    });
+                                    _showClaimDialog(item);
                                   },
                                   style: claimed
                                       ? TextButton.styleFrom(
@@ -175,7 +274,9 @@ class _ShoppingPageState extends State<ShoppingPage> {
                                     size: 18,
                                   ),
                                   label: Text(
-                                    claimed ? 'Reserviert' : 'Ich kaufe das',
+                                    claimed
+                                        ? '$claimedMember kauft das'
+                                        : 'Ich kaufe das',
                                   ),
                                 ),
                               ],
@@ -185,7 +286,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
                           IconButton(
                             onPressed: () {
                               setState(() {
-                                _shoppingItems.removeAt(index);
+                                WGData.shoppingItems.removeAt(index);
                               });
                             },
                             icon: const Icon(Icons.delete_outline),

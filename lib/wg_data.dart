@@ -7,7 +7,7 @@ class WGMember {
 
 class WGData {
   static final List<WGMember> members = [];
-
+  static final List<Map<String, dynamic>> shoppingItems = [];
   static final List<Map<String, dynamic>> tasks = [];
 
   static String? currentMemberId;
