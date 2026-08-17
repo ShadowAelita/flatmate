@@ -25,10 +25,74 @@ class _TaskPageState extends State<TaskPage> {
         'name': task,
         'completed': false,
         'assignedTo': null,
+        'dueDate': null,
       });
     });
 
     _controller.clear();
+
+    await WGData.save();
+  }
+
+  String _formatDueDate(dynamic value) {
+    if (value == null) {
+      return 'Keine Frist';
+    }
+
+    final date = DateTime.tryParse(value as String);
+
+    if (date == null) {
+      return 'Keine Frist';
+    }
+
+    final now = DateTime.now();
+
+    final today = DateTime(now.year, now.month, now.day);
+
+    final dueDay = DateTime(date.year, date.month, date.day);
+
+    final difference = dueDay.difference(today).inDays;
+
+    if (difference < 0) {
+      return 'Überfällig';
+    }
+
+    if (difference == 0) {
+      return 'Heute';
+    }
+
+    if (difference == 1) {
+      return 'Morgen';
+    }
+
+    if (difference == 2) {
+      return 'Übermorgen';
+    }
+
+    return '${date.day}.${date.month}.${date.year}';
+  }
+
+  Future<void> _pickDueDate(Map<String, dynamic> task) async {
+    final now = DateTime.now();
+
+    final currentDate = task['dueDate'] != null
+        ? DateTime.tryParse(task['dueDate'] as String)
+        : null;
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: currentDate ?? now,
+      firstDate: now,
+      lastDate: DateTime(now.year + 5),
+    );
+
+    if (pickedDate == null) {
+      return;
+    }
+
+    setState(() {
+      task['dueDate'] = pickedDate.toIso8601String();
+    });
 
     await WGData.save();
   }
@@ -270,6 +334,33 @@ class _TaskPageState extends State<TaskPage> {
                                                             .colorScheme
                                                             .onSurfaceVariant
                                                       : null,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () => _pickDueDate(task),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 4,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.calendar_today_outlined,
+                                                size: 18,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                _formatDueDate(task['dueDate']),
+                                                style: TextStyle(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
                                                 ),
                                               ),
                                             ],
