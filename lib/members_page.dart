@@ -165,6 +165,18 @@ class _MembersPageState extends State<MembersPage> {
                                   if (WGData.currentMemberId == member.id) {
                                     WGData.currentMemberId = null;
                                   }
+
+                                  for (final task in WGData.tasks) {
+                                    if (task['assignedTo'] == member.id) {
+                                      task['assignedTo'] = null;
+                                    }
+                                  }
+
+                                  for (final item in WGData.shoppingItems) {
+                                    if (item['claimedBy'] == member.id) {
+                                      item['claimedBy'] = null;
+                                    }
+                                  }
                                 });
 
                                 await WGData.save();
