@@ -11,6 +11,7 @@ class MembersPage extends StatefulWidget {
 
 class _MembersPageState extends State<MembersPage> {
   final TextEditingController _controller = TextEditingController();
+
   void _showCurrentUserDialog() {
     if (WGData.members.isEmpty) {
       return;
@@ -80,12 +81,68 @@ class _MembersPageState extends State<MembersPage> {
       return;
     }
 
+    int selectedColorIndex = 0;
+
+    final chosenColorIndex = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Wähle deine Farbe'),
+              content: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: List.generate(WGData.memberColors.length, (index) {
+                  final color = WGData.memberColors[index];
+                  final selected = selectedColorIndex == index;
+
+                  return GestureDetector(
+                    onTap: () {
+                      setDialogState(() {
+                        selectedColorIndex = index;
+                      });
+                    },
+                    child: CircleAvatar(
+                      radius: 28,
+                      backgroundColor: color,
+                      child: selected
+                          ? const Icon(Icons.check, color: Colors.white)
+                          : null,
+                    ),
+                  );
+                }),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Abbrechen'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(context, selectedColorIndex);
+                  },
+                  child: const Text('Hinzufügen'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (chosenColorIndex == null) {
+      return;
+    }
+
     setState(() {
       WGData.members.add(
         WGMember(
           id: DateTime.now().microsecondsSinceEpoch.toString(),
           name: name,
-          colorIndex: WGData.members.length % 6,
+          colorIndex: chosenColorIndex,
         ),
       );
     });
@@ -93,8 +150,79 @@ class _MembersPageState extends State<MembersPage> {
     _controller.clear();
 
     await WGData.save();
+  }
 
-    _controller.clear();
+  Future<void> _showEditMemberDialog(WGMember member) async {
+    final result = await showDialog<_EditMemberResult>(
+      context: context,
+      builder: (context) {
+        return _EditMemberDialog(member: member);
+      },
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    if (result.delete) {
+      await _deleteMember(member);
+      return;
+    }
+
+    final newName = result.name!;
+    final newColorIndex = result.colorIndex!;
+
+    final duplicate = WGData.members.any(
+      (existingMember) =>
+          existingMember.id != member.id &&
+          existingMember.name.toLowerCase() == newName.toLowerCase(),
+    );
+
+    if (duplicate) {
+      return;
+    }
+
+    setState(() {
+      final index = WGData.members.indexWhere(
+        (existingMember) => existingMember.id == member.id,
+      );
+
+      if (index != -1) {
+        WGData.members[index] = WGMember(
+          id: member.id,
+          name: newName,
+          colorIndex: newColorIndex,
+        );
+      }
+    });
+
+    await WGData.save();
+  }
+
+  Future<void> _deleteMember(WGMember member) async {
+    setState(() {
+      WGData.members.removeWhere(
+        (existingMember) => existingMember.id == member.id,
+      );
+
+      if (WGData.currentMemberId == member.id) {
+        WGData.currentMemberId = null;
+      }
+
+      for (final task in WGData.tasks) {
+        if (task['assignedTo'] == member.id) {
+          task['assignedTo'] = null;
+        }
+      }
+
+      for (final item in WGData.shoppingItems) {
+        if (item['claimedBy'] == member.id) {
+          item['claimedBy'] = null;
+        }
+      }
+    });
+
+    await WGData.save();
   }
 
   @override
@@ -107,19 +235,23 @@ class _MembersPageState extends State<MembersPage> {
           children: [
             Card(
               child: ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.person)),
+                leading: CircleAvatar(
+                  backgroundColor: WGData.currentMember == null
+                      ? null
+                      : WGData.memberColor(WGData.currentMember!),
+                  child: const Icon(Icons.person),
+                ),
                 title: const Text('Aktiver Benutzer'),
                 subtitle: Text(
                   WGData.currentMember?.name ?? 'Niemand ausgewählt',
                 ),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  _showCurrentUserDialog();
-                },
+                onTap: _showCurrentUserDialog,
               ),
             ),
 
             const SizedBox(height: 16),
+
             TextField(
               controller: _controller,
               textInputAction: TextInputAction.done,
@@ -153,69 +285,20 @@ class _MembersPageState extends State<MembersPage> {
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor: WGData.memberColor(member),
-                              child: const Icon(Icons.person),
+                              child: Text(
+                                member.name.isNotEmpty
+                                    ? member.name[0].toUpperCase()
+                                    : '?',
+                              ),
                             ),
                             title: Text(member.name),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete_outline),
-                              tooltip: 'Löschen',
-                              onPressed: () async {
-                                final member = WGData.members[index];
-
-                                final confirmed = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) {
-                                    return AlertDialog(
-                                      title: const Text('Bewohner löschen?'),
-                                      content: Text(
-                                        'Möchtest du ${member.name} wirklich aus der WG löschen?\n\n'
-                                        'Zugewiesene Aufgaben und Reservierungen werden freigegeben.',
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () {
-                                            Navigator.pop(context, false);
-                                          },
-                                          child: const Text('Abbrechen'),
-                                        ),
-                                        FilledButton(
-                                          onPressed: () {
-                                            Navigator.pop(context, true);
-                                          },
-                                          child: const Text('Löschen'),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                );
-
-                                if (confirmed != true) {
-                                  return;
-                                }
-
-                                setState(() {
-                                  WGData.members.removeAt(index);
-
-                                  if (WGData.currentMemberId == member.id) {
-                                    WGData.currentMemberId = null;
-                                  }
-
-                                  for (final task in WGData.tasks) {
-                                    if (task['assignedTo'] == member.id) {
-                                      task['assignedTo'] = null;
-                                    }
-                                  }
-
-                                  for (final item in WGData.shoppingItems) {
-                                    if (item['claimedBy'] == member.id) {
-                                      item['claimedBy'] = null;
-                                    }
-                                  }
-                                });
-
-                                await WGData.save();
-                              },
-                            ),
+                            subtitle: WGData.currentMemberId == member.id
+                                ? const Text('Du')
+                                : null,
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              _showEditMemberDialog(member);
+                            },
                           ),
                         );
                       },
@@ -226,4 +309,180 @@ class _MembersPageState extends State<MembersPage> {
       ),
     );
   }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+class _EditMemberDialog extends StatefulWidget {
+  final WGMember member;
+
+  const _EditMemberDialog({required this.member});
+
+  @override
+  State<_EditMemberDialog> createState() => _EditMemberDialogState();
+}
+
+class _EditMemberDialogState extends State<_EditMemberDialog> {
+  late final TextEditingController _nameController;
+  late int _selectedColorIndex;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _nameController = TextEditingController(text: widget.member.name);
+
+    _selectedColorIndex = widget.member.colorIndex;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Profil bearbeiten'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                prefixIcon: Icon(Icons.person_outline),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            const Text(
+              'Farbe',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 12),
+
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: List.generate(WGData.memberColors.length, (index) {
+                final color = WGData.memberColors[index];
+                final selected = _selectedColorIndex == index;
+
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedColorIndex = index;
+                    });
+                  },
+                  child: CircleAvatar(
+                    radius: 26,
+                    backgroundColor: color,
+                    child: selected
+                        ? const Icon(Icons.check, color: Colors.white)
+                        : null,
+                  ),
+                );
+              }),
+            ),
+
+            const SizedBox(height: 24),
+
+            const Divider(),
+
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text(
+                'Bewohner löschen',
+                style: TextStyle(color: Colors.red),
+              ),
+              onTap: _requestDelete,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context);
+          },
+          child: const Text('Abbrechen'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final newName = _nameController.text.trim();
+
+            if (newName.isEmpty) {
+              return;
+            }
+
+            Navigator.pop(
+              context,
+              _EditMemberResult(name: newName, colorIndex: _selectedColorIndex),
+            );
+          },
+          child: const Text('Speichern'),
+        ),
+      ],
+    );
+  }
+
+  void _requestDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Bewohner löschen?'),
+          content: Text(
+            'Möchtest du ${widget.member.name} wirklich aus der WG löschen?\n\n'
+            'Zugewiesene Aufgaben und Reservierungen werden freigegeben.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
+              child: const Text('Löschen'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    Navigator.pop(context, _EditMemberResult.delete());
+  }
+}
+
+class _EditMemberResult {
+  final String? name;
+  final int? colorIndex;
+  final bool delete;
+
+  const _EditMemberResult({this.name, this.colorIndex, this.delete = false});
+
+  const _EditMemberResult.delete()
+    : name = null,
+      colorIndex = null,
+      delete = true;
 }
