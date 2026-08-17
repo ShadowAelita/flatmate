@@ -12,6 +12,8 @@ class ShoppingPage extends StatefulWidget {
 class _ShoppingPageState extends State<ShoppingPage> {
   final TextEditingController _controller = TextEditingController();
 
+  bool _showCompleted = true;
+
   Future<void> _addItem() async {
     final item = _controller.text.trim();
 
@@ -140,8 +142,159 @@ class _ShoppingPageState extends State<ShoppingPage> {
     );
   }
 
+  Widget _buildShoppingItem(
+    BuildContext context,
+    Map<String, dynamic> item,
+    int index,
+  ) {
+    final completed = item['completed'] as bool;
+    final quantity = item['quantity'] as int;
+    final claimedMember = _getClaimedMemberName(item);
+    final claimed = claimedMember != null;
+
+    final cardColor = completed
+        ? Colors.green.withValues(alpha: 0.15)
+        : claimed
+        ? Colors.amber.withValues(alpha: 0.15)
+        : null;
+
+    return Card(
+      color: cardColor,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          children: [
+            Checkbox(
+              value: completed,
+              onChanged: (value) async {
+                setState(() {
+                  item['completed'] = value ?? false;
+                });
+
+                await WGData.save();
+              },
+            ),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item['name'],
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      decoration: completed
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
+                      color: completed
+                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                          : null,
+                    ),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  Row(
+                    children: [
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: quantity > 1
+                            ? () async {
+                                setState(() {
+                                  item['quantity']--;
+                                });
+
+                                await WGData.save();
+                              }
+                            : null,
+                        icon: const Icon(Icons.remove),
+                        tooltip: 'Weniger',
+                      ),
+
+                      Container(
+                        width: 32,
+                        alignment: Alignment.center,
+                        child: Text(
+                          '$quantity',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () async {
+                          setState(() {
+                            item['quantity']++;
+                          });
+
+                          await WGData.save();
+                        },
+                        icon: const Icon(Icons.add),
+                        tooltip: 'Mehr',
+                      ),
+                    ],
+                  ),
+
+                  TextButton.icon(
+                    onPressed: () {
+                      _showClaimDialog(item);
+                    },
+                    style: claimed
+                        ? TextButton.styleFrom(foregroundColor: Colors.amber)
+                        : null,
+                    icon: Icon(
+                      claimed
+                          ? Icons.lock_outline
+                          : Icons.shopping_bag_outlined,
+                      size: 18,
+                      color: claimed
+                          ? WGData.memberColor(
+                              WGData.members.firstWhere(
+                                (member) => member.id == item['claimedBy'],
+                              ),
+                            )
+                          : null,
+                    ),
+                    label: Text(
+                      claimed ? '$claimedMember kauft das' : 'Ich kaufe das',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            IconButton(
+              onPressed: () async {
+                setState(() {
+                  WGData.shoppingItems.removeAt(index);
+                });
+
+                await WGData.save();
+              },
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Löschen',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final openItems = WGData.shoppingItems
+        .where((item) => item['completed'] != true)
+        .toList();
+
+    final completedItems = WGData.shoppingItems
+        .where((item) => item['completed'] == true)
+        .toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('Einkaufen')),
       body: Padding(
@@ -174,156 +327,79 @@ class _ShoppingPageState extends State<ShoppingPage> {
             const SizedBox(height: 16),
 
             Expanded(
-              child: ListView.builder(
-                itemCount: WGData.shoppingItems.length,
-                itemBuilder: (context, index) {
-                  final item = WGData.shoppingItems[index];
-                  final completed = item['completed'] as bool;
-                  final quantity = item['quantity'] as int;
-                  final claimedMember = _getClaimedMemberName(item);
-                  final claimed = claimedMember != null;
+              child: ListView(
+                children: [
+                  Text(
+                    'Offen',
+                    style: Theme.of(context).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
 
-                  final cardColor = completed
-                      ? Colors.green.withValues(alpha: 0.15)
-                      : claimed
-                      ? Colors.amber.withValues(alpha: 0.15)
-                      : null;
-                  return Card(
-                    color: cardColor,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
+                  const SizedBox(height: 8),
+
+                  if (openItems.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text(
+                          'Keine offenen Einkäufe',
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
                       ),
-                      child: Row(
+                    )
+                  else
+                    ...openItems.map(
+                      (item) => _buildShoppingItem(
+                        context,
+                        item,
+                        WGData.shoppingItems.indexOf(item),
+                      ),
+                    ),
+
+                  const SizedBox(height: 8),
+
+                  if (completedItems.isNotEmpty)
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: ExpansionTile(
+                        initiallyExpanded: _showCompleted,
+                        onExpansionChanged: (expanded) {
+                          setState(() {
+                            _showCompleted = expanded;
+                          });
+                        },
+                        leading: const Icon(Icons.check_circle_outline),
+                        title: const Text(
+                          'Erledigt',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          '${completedItems.length} '
+                          '${completedItems.length == 1 ? 'Artikel' : 'Artikel'}',
+                        ),
                         children: [
-                          Checkbox(
-                            value: completed,
-                            onChanged: (value) async {
-                              setState(() {
-                                item['completed'] = value ?? false;
-                              });
-
-                              await WGData.save();
-                            },
-                          ),
-
-                          Expanded(
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item['name'],
-                                  style: TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w600,
-                                    decoration: completed
-                                        ? TextDecoration.lineThrough
-                                        : TextDecoration.none,
-                                    color: completed
-                                        ? Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant
-                                        : null,
-                                  ),
-                                ),
-
-                                const SizedBox(height: 6),
-
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: quantity > 1
-                                          ? () async {
-                                              setState(() {
-                                                item['quantity']--;
-                                              });
-
-                                              await WGData.save();
-                                            }
-                                          : null,
-                                      icon: const Icon(Icons.remove),
-                                      tooltip: 'Weniger',
+                              children: completedItems
+                                  .map(
+                                    (item) => _buildShoppingItem(
+                                      context,
+                                      item,
+                                      WGData.shoppingItems.indexOf(item),
                                     ),
-
-                                    Container(
-                                      width: 32,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        '$quantity',
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: () async {
-                                        setState(() {
-                                          item['quantity']++;
-                                        });
-
-                                        await WGData.save();
-                                      },
-                                      icon: const Icon(Icons.add),
-                                      tooltip: 'Mehr',
-                                    ),
-                                  ],
-                                ),
-                                TextButton.icon(
-                                  onPressed: () {
-                                    _showClaimDialog(item);
-                                  },
-                                  style: claimed
-                                      ? TextButton.styleFrom(
-                                          foregroundColor: Colors.amber,
-                                        )
-                                      : null,
-                                  icon: Icon(
-                                    claimed
-                                        ? Icons.lock_outline
-                                        : Icons.shopping_bag_outlined,
-                                    size: 18,
-                                    color: claimed
-                                        ? WGData.memberColor(
-                                            WGData.members.firstWhere(
-                                              (member) =>
-                                                  member.id ==
-                                                  item['claimedBy'],
-                                            ),
-                                          )
-                                        : null,
-                                  ),
-                                  label: Text(
-                                    claimed
-                                        ? '$claimedMember kauft das'
-                                        : 'Ich kaufe das',
-                                  ),
-                                ),
-                              ],
+                                  )
+                                  .toList(),
                             ),
-                          ),
-
-                          IconButton(
-                            onPressed: () async {
-                              setState(() {
-                                WGData.shoppingItems.removeAt(index);
-                              });
-
-                              await WGData.save();
-                            },
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Löschen',
                           ),
                         ],
                       ),
                     ),
-                  );
-                },
+                ],
               ),
             ),
           ],
