@@ -8,16 +8,55 @@ import 'wg_data.dart';
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
+  Color _taskDueDateColor(BuildContext context, Map<String, dynamic> task) {
+    final value = task['dueDate'];
+
+    if (value == null) {
+      return Theme.of(context).colorScheme.onSurface;
+    }
+
+    final date = DateTime.tryParse(value as String);
+
+    if (date == null) {
+      return Theme.of(context).colorScheme.onSurface;
+    }
+
+    final now = DateTime.now();
+
+    final today = DateTime(now.year, now.month, now.day);
+
+    final dueDay = DateTime(date.year, date.month, date.day);
+
+    final difference = dueDay.difference(today).inDays;
+
+    if (difference < 0) {
+      return Colors.red;
+    }
+
+    if (difference == 0) {
+      return Colors.yellow.shade700;
+    }
+
+    if (difference == 1) {
+      return Colors.green;
+    }
+
+    return Theme.of(context).colorScheme.onSurface;
+  }
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<int>(
       valueListenable: WGData.version,
       builder: (context, _, child) {
         final currentMember = WGData.currentMember;
+
         final currentMemberTasks = WGData.currentMemberTasks.take(3).toList();
+
         final currentMemberShoppingItems = WGData.currentMemberShoppingItems
             .take(3)
             .toList();
+
         return Scaffold(
           appBar: AppBar(title: const Text('Unsere WG')),
           body: Padding(
@@ -91,10 +130,7 @@ class HomePage extends StatelessWidget {
                     crossAxisCount: 2,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
-
-                    // Slightly taller than wide.
                     childAspectRatio: 0.9,
-
                     children: [
                       // 🛒 Einkaufen
                       Card(
@@ -109,20 +145,24 @@ class HomePage extends StatelessWidget {
                             );
                           },
                           child: Padding(
-                            padding: EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(16),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.shopping_cart, size: 48),
-                                SizedBox(height: 16),
-                                Text(
+                                const Icon(Icons.shopping_cart, size: 48),
+
+                                const SizedBox(height: 16),
+
+                                const Text(
                                   'Einkaufen',
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                SizedBox(height: 6),
+
+                                const SizedBox(height: 6),
+
                                 Column(
                                   children: [
                                     Text(
@@ -183,20 +223,24 @@ class HomePage extends StatelessWidget {
                             );
                           },
                           child: Padding(
-                            padding: EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(16),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.check_circle, size: 48),
-                                SizedBox(height: 16),
-                                Text(
+                                const Icon(Icons.check_circle, size: 48),
+
+                                const SizedBox(height: 16),
+
+                                const Text(
                                   'Aufgaben',
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                SizedBox(height: 6),
+
+                                const SizedBox(height: 6),
+
                                 if (currentMember == null)
                                   const Text('Keine Person ausgewählt')
                                 else if (currentMemberTasks.isEmpty)
@@ -213,6 +257,12 @@ class HomePage extends StatelessWidget {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: _taskDueDateColor(
+                                              context,
+                                              task,
+                                            ),
+                                          ),
                                         ),
                                       );
                                     }).toList(),
@@ -236,7 +286,9 @@ class HomePage extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(Icons.chat, size: 48),
+
                                 SizedBox(height: 16),
+
                                 Text(
                                   'Chat',
                                   style: TextStyle(
@@ -244,7 +296,9 @@ class HomePage extends StatelessWidget {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
+
                                 SizedBox(height: 6),
+
                                 Text('Keine neuen Nachrichten'),
                               ],
                             ),
@@ -265,13 +319,15 @@ class HomePage extends StatelessWidget {
                             );
                           },
                           child: Padding(
-                            padding: EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(16),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.people, size: 48),
-                                SizedBox(height: 16),
-                                Text(
+                                const Icon(Icons.people, size: 48),
+
+                                const SizedBox(height: 16),
+
+                                const Text(
                                   'Unsere WG',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
@@ -279,7 +335,9 @@ class HomePage extends StatelessWidget {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                SizedBox(height: 6),
+
+                                const SizedBox(height: 6),
+
                                 Text(
                                   WGData.memberCount == 1
                                       ? '1 Bewohner'

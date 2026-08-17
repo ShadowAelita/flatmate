@@ -34,6 +34,47 @@ class _TaskPageState extends State<TaskPage> {
     await WGData.save();
   }
 
+  Future<void> _sortTasksByDueDate() async {
+    setState(() {
+      WGData.tasks.sort((a, b) {
+        final aValue = a['dueDate'];
+        final bValue = b['dueDate'];
+
+        // Tasks without a deadline go to the bottom.
+        if (aValue == null && bValue == null) {
+          return 0;
+        }
+
+        if (aValue == null) {
+          return 1;
+        }
+
+        if (bValue == null) {
+          return -1;
+        }
+
+        final aDate = DateTime.tryParse(aValue as String);
+        final bDate = DateTime.tryParse(bValue as String);
+
+        if (aDate == null && bDate == null) {
+          return 0;
+        }
+
+        if (aDate == null) {
+          return 1;
+        }
+
+        if (bDate == null) {
+          return -1;
+        }
+
+        return aDate.compareTo(bDate);
+      });
+    });
+
+    await WGData.save();
+  }
+
   String _formatDueDate(dynamic value) {
     if (value == null) {
       return 'Keine Frist';
@@ -70,6 +111,40 @@ class _TaskPageState extends State<TaskPage> {
     }
 
     return '${date.day}.${date.month}.${date.year}';
+  }
+
+  Color _dueDateColor(BuildContext context, dynamic value) {
+    if (value == null) {
+      return Theme.of(context).colorScheme.onSurfaceVariant;
+    }
+
+    final date = DateTime.tryParse(value as String);
+
+    if (date == null) {
+      return Theme.of(context).colorScheme.onSurfaceVariant;
+    }
+
+    final now = DateTime.now();
+
+    final today = DateTime(now.year, now.month, now.day);
+
+    final dueDay = DateTime(date.year, date.month, date.day);
+
+    final difference = dueDay.difference(today).inDays;
+
+    if (difference < 0) {
+      return Colors.red;
+    }
+
+    if (difference == 0) {
+      return Colors.yellow.shade700;
+    }
+
+    if (difference == 1) {
+      return Colors.green;
+    }
+
+    return Theme.of(context).colorScheme.onSurfaceVariant;
   }
 
   Future<void> _pickDueDate(Map<String, dynamic> task) async {
@@ -109,7 +184,9 @@ class _TaskPageState extends State<TaskPage> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  Navigator.pop(context);
+                },
                 child: const Text('OK'),
               ),
             ],
@@ -154,13 +231,16 @@ class _TaskPageState extends State<TaskPage> {
                   },
                 ),
 
-                ...WGData.members.map(
-                  (member) => ListTile(
+                ...WGData.members.map((member) {
+                  final selected = task['assignedTo'] == member.id;
+
+                  return ListTile(
                     leading: CircleAvatar(
                       backgroundColor: WGData.memberColor(member),
                       child: const Icon(Icons.person),
                     ),
                     title: Text(member.name),
+                    trailing: selected ? const Icon(Icons.check) : null,
                     onTap: () async {
                       setState(() {
                         task['assignedTo'] = member.id;
@@ -172,8 +252,8 @@ class _TaskPageState extends State<TaskPage> {
                         Navigator.pop(context);
                       }
                     },
-                  ),
-                ),
+                  );
+                }),
               ],
             ),
           ),
@@ -199,9 +279,25 @@ class _TaskPageState extends State<TaskPage> {
   }
 
   @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Aufgaben')),
+      appBar: AppBar(
+        title: const Text('Aufgaben'),
+        actions: [
+          IconButton(
+            onPressed: _sortTasksByDueDate,
+            icon: const Icon(Icons.sort),
+            tooltip: 'Nach Frist sortieren',
+          ),
+        ],
+      ),
+
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -232,19 +328,24 @@ class _TaskPageState extends State<TaskPage> {
                     )
                   : ReorderableListView.builder(
                       itemCount: WGData.tasks.length,
+
                       onReorder: (oldIndex, newIndex) async {
                         if (oldIndex < newIndex) {
                           newIndex -= 1;
                         }
 
                         final task = WGData.tasks.removeAt(oldIndex);
+
                         WGData.tasks.insert(newIndex, task);
 
                         await WGData.save();
                       },
+
                       itemBuilder: (context, index) {
                         final task = WGData.tasks[index];
+
                         final completed = task['completed'] as bool;
+
                         final assignedMember = _getAssignedMemberName(task);
 
                         final cardColor = completed
@@ -255,11 +356,13 @@ class _TaskPageState extends State<TaskPage> {
                           key: ValueKey(task['id']),
                           color: cardColor,
                           margin: const EdgeInsets.only(bottom: 12),
+
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
                               vertical: 8,
                             ),
+
                             child: Row(
                               children: [
                                 Checkbox(
@@ -296,6 +399,7 @@ class _TaskPageState extends State<TaskPage> {
 
                                       const SizedBox(height: 4),
 
+                                      // Assignment
                                       InkWell(
                                         borderRadius: BorderRadius.circular(8),
                                         onTap: () =>
@@ -312,19 +416,10 @@ class _TaskPageState extends State<TaskPage> {
                                                     ? Icons.person_outline
                                                     : Icons.person,
                                                 size: 18,
-                                                color: assignedMember == null
-                                                    ? Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant
-                                                    : WGData.memberColor(
-                                                        WGData.members.firstWhere(
-                                                          (member) =>
-                                                              member.id ==
-                                                              task['assignedTo'],
-                                                        ),
-                                                      ),
                                               ),
+
                                               const SizedBox(width: 6),
+
                                               Text(
                                                 assignedMember ??
                                                     'Nicht zugewiesen',
@@ -340,6 +435,8 @@ class _TaskPageState extends State<TaskPage> {
                                           ),
                                         ),
                                       ),
+
+                                      // Due date
                                       InkWell(
                                         borderRadius: BorderRadius.circular(8),
                                         onTap: () => _pickDueDate(task),
@@ -350,17 +447,24 @@ class _TaskPageState extends State<TaskPage> {
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              const Icon(
+                                              Icon(
                                                 Icons.calendar_today_outlined,
                                                 size: 18,
+                                                color: _dueDateColor(
+                                                  context,
+                                                  task['dueDate'],
+                                                ),
                                               ),
+
                                               const SizedBox(width: 6),
+
                                               Text(
                                                 _formatDueDate(task['dueDate']),
                                                 style: TextStyle(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
+                                                  color: _dueDateColor(
+                                                    context,
+                                                    task['dueDate'],
+                                                  ),
                                                 ),
                                               ),
                                             ],
