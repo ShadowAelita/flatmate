@@ -22,7 +22,10 @@ class WGData {
   static final List<WGMember> members = [];
   static final List<Map<String, dynamic>> shoppingItems = [];
   static final List<Map<String, dynamic>> tasks = [];
+  static final List<Map<String, dynamic>> chatMessages = [];
+
   static final ValueNotifier<int> version = ValueNotifier<int>(0);
+
   static const List<Color> memberColors = [
     Colors.red,
     Colors.orange,
@@ -31,6 +34,7 @@ class WGData {
     Colors.cyan,
     Colors.purple,
   ];
+
   static Color memberColor(WGMember member) {
     return memberColors[member.colorIndex % memberColors.length];
   }
@@ -116,11 +120,13 @@ class WGData {
     final savedMembers = prefs.getString('members');
     final savedShoppingItems = prefs.getString('shoppingItems');
     final savedTasks = prefs.getString('tasks');
+    final savedChatMessages = prefs.getString('chatMessages');
     final savedCurrentMemberId = prefs.getString('currentMemberId');
 
     members.clear();
     shoppingItems.clear();
     tasks.clear();
+    chatMessages.clear();
 
     if (savedMembers != null) {
       final decodedMembers = jsonDecode(savedMembers) as List;
@@ -165,6 +171,16 @@ class WGData {
       );
     }
 
+    if (savedChatMessages != null) {
+      final decodedChatMessages = jsonDecode(savedChatMessages) as List;
+
+      chatMessages.addAll(
+        decodedChatMessages.map((message) {
+          return Map<String, dynamic>.from(message as Map);
+        }),
+      );
+    }
+
     currentMemberId = savedCurrentMemberId;
 
     if (tasksChanged) {
@@ -189,11 +205,14 @@ class WGData {
 
     await prefs.setString('tasks', jsonEncode(tasks));
 
+    await prefs.setString('chatMessages', jsonEncode(chatMessages));
+
     if (currentMemberId != null) {
       await prefs.setString('currentMemberId', currentMemberId!);
     } else {
       await prefs.remove('currentMemberId');
     }
+
     version.value++;
   }
 }

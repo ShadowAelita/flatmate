@@ -4,6 +4,7 @@ import 'shopping_page.dart';
 import 'task_page.dart';
 import 'members_page.dart';
 import 'wg_data.dart';
+import 'chat_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -278,7 +279,12 @@ class HomePage extends StatelessWidget {
                         child: InkWell(
                           borderRadius: BorderRadius.circular(18),
                           onTap: () {
-                            // Chat kommt später.
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ChatPage(),
+                              ),
+                            );
                           },
                           child: const Padding(
                             padding: EdgeInsets.all(16),
