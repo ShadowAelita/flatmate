@@ -262,6 +262,22 @@ class _TaskPageState extends State<TaskPage> {
     );
   }
 
+  WGMember? _getAssignedMember(Map<String, dynamic> task) {
+    final assignedTo = task['assignedTo'];
+
+    if (assignedTo == null) {
+      return null;
+    }
+
+    for (final member in WGData.members) {
+      if (member.id == assignedTo) {
+        return member;
+      }
+    }
+
+    return null;
+  }
+
   String? _getAssignedMemberName(Map<String, dynamic> task) {
     final assignedTo = task['assignedTo'];
 
@@ -346,7 +362,7 @@ class _TaskPageState extends State<TaskPage> {
 
                         final completed = task['completed'] as bool;
 
-                        final assignedMember = _getAssignedMemberName(task);
+                        final assignedMember = _getAssignedMember(task);
 
                         final cardColor = completed
                             ? Colors.green.withValues(alpha: 0.15)
@@ -416,19 +432,28 @@ class _TaskPageState extends State<TaskPage> {
                                                     ? Icons.person_outline
                                                     : Icons.person,
                                                 size: 18,
+                                                color: assignedMember == null
+                                                    ? Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant
+                                                    : WGData.memberColor(
+                                                        assignedMember,
+                                                      ),
                                               ),
 
                                               const SizedBox(width: 6),
 
                                               Text(
-                                                assignedMember ??
+                                                assignedMember?.name ??
                                                     'Nicht zugewiesen',
                                                 style: TextStyle(
                                                   color: assignedMember == null
                                                       ? Theme.of(context)
                                                             .colorScheme
                                                             .onSurfaceVariant
-                                                      : null,
+                                                      : WGData.memberColor(
+                                                          assignedMember,
+                                                        ),
                                                 ),
                                               ),
                                             ],
