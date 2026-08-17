@@ -104,7 +104,8 @@ class _ChatPageState extends State<ChatPage> {
                       }
 
                       final isCurrentMember = currentMember?.id == sender.id;
-
+                      final bubbleColor = WGData.memberColor(sender)
+                          .withValues(alpha: 0.20);
                       return Align(
                         alignment: isCurrentMember
                             ? Alignment.centerRight
@@ -116,11 +117,7 @@ class _ChatPageState extends State<ChatPage> {
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: isCurrentMember
-                                ? Theme.of(context).colorScheme.primaryContainer
-                                : Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest,
+                            color: bubbleColor,
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Column(
