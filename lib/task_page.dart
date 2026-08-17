@@ -12,7 +12,7 @@ class TaskPage extends StatefulWidget {
 class _TaskPageState extends State<TaskPage> {
   final TextEditingController _controller = TextEditingController();
 
-  void _addTask() {
+  Future<void> _addTask() async {
     final task = _controller.text.trim();
 
     if (task.isEmpty) {
@@ -24,6 +24,8 @@ class _TaskPageState extends State<TaskPage> {
     });
 
     _controller.clear();
+
+    await WGData.save();
   }
 
   void _showAssignmentDialog(Map<String, dynamic> task) {
@@ -70,12 +72,16 @@ class _TaskPageState extends State<TaskPage> {
                 ListTile(
                   leading: const Icon(Icons.person_off_outlined),
                   title: const Text('Niemanden zuweisen'),
-                  onTap: () {
+                  onTap: () async {
                     setState(() {
                       task['assignedTo'] = null;
                     });
 
-                    Navigator.pop(context);
+                    await WGData.save();
+
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
                   },
                 ),
 
@@ -83,12 +89,16 @@ class _TaskPageState extends State<TaskPage> {
                   (member) => ListTile(
                     leading: const CircleAvatar(child: Icon(Icons.person)),
                     title: Text(member.name),
-                    onTap: () {
+                    onTap: () async {
                       setState(() {
                         task['assignedTo'] = member.id;
                       });
 
-                      Navigator.pop(context);
+                      await WGData.save();
+
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                      }
                     },
                   ),
                 ),
@@ -171,10 +181,12 @@ class _TaskPageState extends State<TaskPage> {
                               children: [
                                 Checkbox(
                                   value: completed,
-                                  onChanged: (value) {
+                                  onChanged: (value) async {
                                     setState(() {
                                       task['completed'] = value ?? false;
                                     });
+
+                                    await WGData.save();
                                   },
                                 ),
 
@@ -239,10 +251,12 @@ class _TaskPageState extends State<TaskPage> {
                                 ),
 
                                 IconButton(
-                                  onPressed: () {
+                                  onPressed: () async {
                                     setState(() {
                                       WGData.tasks.removeAt(index);
                                     });
+
+                                    await WGData.save();
                                   },
                                   icon: const Icon(Icons.delete_outline),
                                   tooltip: 'Löschen',
