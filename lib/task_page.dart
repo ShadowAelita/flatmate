@@ -26,6 +26,8 @@ class _TaskPageState extends State<TaskPage> {
         'completed': false,
         'assignedTo': null,
         'dueDate': null,
+        'dueDate': null,
+        'repeat': 'none',
       });
     });
 
@@ -167,6 +169,84 @@ class _TaskPageState extends State<TaskPage> {
 
     setState(() {
       task['dueDate'] = pickedDate.toIso8601String();
+    });
+
+    await WGData.save();
+  }
+
+  Future<void> _pickRepeat(Map<String, dynamic> task) async {
+    final selectedRepeat = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final currentRepeat = task['repeat'] ?? 'none';
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Wiederholung',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text('Keine Wiederholung'),
+                trailing: currentRepeat == 'none'
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () {
+                  Navigator.pop(context, 'none');
+                },
+              ),
+
+              ListTile(
+                leading: const Icon(Icons.today_outlined),
+                title: const Text('Täglich'),
+                trailing: currentRepeat == 'daily'
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () {
+                  Navigator.pop(context, 'daily');
+                },
+              ),
+
+              ListTile(
+                leading: const Icon(Icons.date_range_outlined),
+                title: const Text('Wöchentlich'),
+                trailing: currentRepeat == 'weekly'
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () {
+                  Navigator.pop(context, 'weekly');
+                },
+              ),
+
+              ListTile(
+                leading: const Icon(Icons.calendar_month_outlined),
+                title: const Text('Monatlich'),
+                trailing: currentRepeat == 'monthly'
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () {
+                  Navigator.pop(context, 'monthly');
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selectedRepeat == null) {
+      return;
+    }
+
+    setState(() {
+      task['repeat'] = selectedRepeat;
     });
 
     await WGData.save();
@@ -490,6 +570,61 @@ class _TaskPageState extends State<TaskPage> {
                                                     context,
                                                     task['dueDate'],
                                                   ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+
+                                      // Repeat
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () => _pickRepeat(task),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 4,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.repeat,
+                                                size: 18,
+                                                color:
+                                                    task['repeat'] != null &&
+                                                        task['repeat'] != 'none'
+                                                    ? Theme.of(context)
+                                                          .colorScheme
+                                                          .primary
+                                                    : Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                              ),
+
+                                              const SizedBox(width: 6),
+
+                                              Text(
+                                                task['repeat'] == 'daily'
+                                                    ? 'Täglich'
+                                                    : task['repeat'] == 'weekly'
+                                                    ? 'Wöchentlich'
+                                                    : task['repeat'] ==
+                                                          'monthly'
+                                                    ? 'Monatlich'
+                                                    : 'Keine Wiederholung',
+                                                style: TextStyle(
+                                                  color:
+                                                      task['repeat'] != null &&
+                                                          task['repeat'] !=
+                                                              'none'
+                                                      ? Theme.of(context)
+                                                            .colorScheme
+                                                            .primary
+                                                      : Theme.of(context)
+                                                            .colorScheme
+                                                            .onSurfaceVariant,
                                                 ),
                                               ),
                                             ],
