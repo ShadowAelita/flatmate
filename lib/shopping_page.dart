@@ -21,17 +21,25 @@ class _ShoppingPageState extends State<ShoppingPage> {
       return;
     }
 
-    setState(() {
-      WGData.shoppingItems.add({
-        'name': item,
-        'completed': false,
-        'quantity': 1,
-        'claimedBy': null,
-      });
-    });
+    try {
+      await WGData.addShoppingItem(name: item, quantity: 1);
 
-    _controller.clear();
-    await WGData.save();
+      _controller.clear();
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not add shopping item: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Einkauf konnte nicht hinzugefügt werden'),
+          ),
+        );
+      }
+    }
   }
 
   String? _getClaimedMemberName(Map<String, dynamic> item) {
@@ -106,14 +114,21 @@ class _ShoppingPageState extends State<ShoppingPage> {
                         ? const Icon(Icons.check)
                         : null,
                     onTap: () async {
-                      setState(() {
-                        item['claimedBy'] = member.id;
-                      });
+                      try {
+                        await WGData.updateShoppingItem(
+                          id: item['id'] as String,
+                          claimedBy: member.id,
+                        );
 
-                      await WGData.save();
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                        }
 
-                      if (context.mounted) {
-                        Navigator.pop(context);
+                        if (mounted) {
+                          setState(() {});
+                        }
+                      } catch (e) {
+                        debugPrint('Could not claim shopping item: $e');
                       }
                     },
                   ),
@@ -123,14 +138,21 @@ class _ShoppingPageState extends State<ShoppingPage> {
                   leading: const Icon(Icons.remove_circle_outline),
                   title: const Text('Reservierung aufheben'),
                   onTap: () async {
-                    setState(() {
-                      item['claimedBy'] = null;
-                    });
+                    try {
+                      await WGData.updateShoppingItem(
+                        id: item['id'] as String,
+                        clearClaimedBy: true,
+                      );
 
-                    await WGData.save();
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                      }
 
-                    if (context.mounted) {
-                      Navigator.pop(context);
+                      if (mounted) {
+                        setState(() {});
+                      }
+                    } catch (e) {
+                      debugPrint('Could not remove shopping claim: $e');
                     }
                   },
                 ),
@@ -168,11 +190,30 @@ class _ShoppingPageState extends State<ShoppingPage> {
             Checkbox(
               value: completed,
               onChanged: (value) async {
-                setState(() {
-                  item['completed'] = value ?? false;
-                });
+                final completed = value ?? false;
 
-                await WGData.save();
+                try {
+                  await WGData.updateShoppingItem(
+                    id: item['id'] as String,
+                    completed: completed,
+                  );
+
+                  if (mounted) {
+                    setState(() {});
+                  }
+                } catch (e) {
+                  debugPrint('Could not update shopping item: $e');
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Einkauf konnte nicht aktualisiert werden',
+                        ),
+                      ),
+                    );
+                  }
+                }
               },
             ),
 
@@ -202,11 +243,18 @@ class _ShoppingPageState extends State<ShoppingPage> {
                         visualDensity: VisualDensity.compact,
                         onPressed: quantity > 1
                             ? () async {
-                                setState(() {
-                                  item['quantity']--;
-                                });
+                                try {
+                                  await WGData.updateShoppingItem(
+                                    id: item['id'] as String,
+                                    quantity: quantity - 1,
+                                  );
 
-                                await WGData.save();
+                                  if (mounted) {
+                                    setState(() {});
+                                  }
+                                } catch (e) {
+                                  debugPrint('Could not decrease quantity: $e');
+                                }
                               }
                             : null,
                         icon: const Icon(Icons.remove),
@@ -228,11 +276,18 @@ class _ShoppingPageState extends State<ShoppingPage> {
                       IconButton(
                         visualDensity: VisualDensity.compact,
                         onPressed: () async {
-                          setState(() {
-                            item['quantity']++;
-                          });
+                          try {
+                            await WGData.updateShoppingItem(
+                              id: item['id'] as String,
+                              quantity: quantity + 1,
+                            );
 
-                          await WGData.save();
+                            if (mounted) {
+                              setState(() {});
+                            }
+                          } catch (e) {
+                            debugPrint('Could not increase quantity: $e');
+                          }
                         },
                         icon: const Icon(Icons.add),
                         tooltip: 'Mehr',
@@ -270,11 +325,15 @@ class _ShoppingPageState extends State<ShoppingPage> {
 
             IconButton(
               onPressed: () async {
-                setState(() {
-                  WGData.shoppingItems.removeAt(index);
-                });
+                try {
+                  await WGData.deleteShoppingItem(item['id'] as String);
 
-                await WGData.save();
+                  if (mounted) {
+                    setState(() {});
+                  }
+                } catch (e) {
+                  debugPrint('Could not delete shopping item: $e');
+                }
               },
               icon: const Icon(Icons.delete_outline),
               tooltip: 'Löschen',

@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -103,6 +102,7 @@ class WGData {
 
     await _loadMembers();
     await _loadTasks();
+    await _loadShoppingItems();
 
     version.value++;
   }
@@ -427,6 +427,130 @@ class WGData {
           .eq('household_id', householdId!);
     }
   }
+  // ============================================================
+  // SHOPPING
+  // ============================================================
+
+  static Future<void> _loadShoppingItems() async {
+    if (householdId == null) {
+      return;
+    }
+
+    final response = await _supabase
+        .from('shopping_items')
+        .select('id, name, completed, quantity, claimed_by, created_at')
+        .eq('household_id', householdId!)
+        .order('created_at');
+
+    shoppingItems.clear();
+
+    for (final row in response) {
+      shoppingItems.add({
+        'id': row['id'],
+        'name': row['name'],
+        'completed': row['completed'] ?? false,
+        'quantity': row['quantity'] ?? 1,
+        'claimedBy': row['claimed_by'],
+      });
+    }
+  }
+
+  static Future<void> addShoppingItem({
+    required String name,
+    int quantity = 1,
+  }) async {
+    if (householdId == null) {
+      return;
+    }
+
+    final response = await _supabase
+        .from('shopping_items')
+        .insert({
+          'household_id': householdId,
+          'name': name,
+          'completed': false,
+          'quantity': quantity,
+          'claimed_by': null,
+        })
+        .select('id, name, completed, quantity, claimed_by, created_at')
+        .single();
+
+    shoppingItems.add({
+      'id': response['id'],
+      'name': response['name'],
+      'completed': response['completed'] ?? false,
+      'quantity': response['quantity'] ?? 1,
+      'claimedBy': response['claimed_by'],
+    });
+
+    version.value++;
+  }
+
+  static Future<void> updateShoppingItem({
+    required String id,
+    bool? completed,
+    int? quantity,
+    String? claimedBy,
+    bool clearClaimedBy = false,
+  }) async {
+    final updates = <String, dynamic>{};
+
+    if (completed != null) {
+      updates['completed'] = completed;
+    }
+
+    if (quantity != null) {
+      updates['quantity'] = quantity;
+    }
+
+    if (clearClaimedBy) {
+      updates['claimed_by'] = null;
+    } else if (claimedBy != null) {
+      updates['claimed_by'] = claimedBy;
+    }
+
+    if (updates.isEmpty) {
+      return;
+    }
+
+    await _supabase
+        .from('shopping_items')
+        .update(updates)
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    final index = shoppingItems.indexWhere((item) => item['id'] == id);
+
+    if (index != -1) {
+      if (completed != null) {
+        shoppingItems[index]['completed'] = completed;
+      }
+
+      if (quantity != null) {
+        shoppingItems[index]['quantity'] = quantity;
+      }
+
+      if (clearClaimedBy) {
+        shoppingItems[index]['claimedBy'] = null;
+      } else if (claimedBy != null) {
+        shoppingItems[index]['claimedBy'] = claimedBy;
+      }
+    }
+
+    version.value++;
+  }
+
+  static Future<void> deleteShoppingItem(String id) async {
+    await _supabase
+        .from('shopping_items')
+        .delete()
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    shoppingItems.removeWhere((item) => item['id'] == id);
+
+    version.value++;
+  }
 
   // ============================================================
   // CURRENT MEMBER
@@ -520,16 +644,14 @@ class WGData {
   // LEGACY LOCAL SAVE
   // ============================================================
   //
-  // We keep this temporarily for tasks/shopping/chat because
-  // those are not migrated to Supabase yet.
+  // We keep this temporarily for chat because chat has not
+  // been migrated to Supabase yet.
   //
-  // Members are NO LONGER saved here.
+  // Members, tasks and shopping are stored in Supabase.
   //
 
   static Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
-
-    await prefs.setString('shoppingItems', jsonEncode(shoppingItems));
 
     await prefs.setString('chatMessages', jsonEncode(chatMessages));
 
