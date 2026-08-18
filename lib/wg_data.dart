@@ -370,7 +370,7 @@ class WGData {
   }
 
   static Future<void> _flushPendingOperations() async {
-    if (householdId == null || _syncFuture != null) {
+    if (householdId == null) {
       return;
     }
 
