@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'wg_data.dart';
 import 'home_page.dart';
@@ -6,7 +7,10 @@ import 'home_page.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await WGData.initialize();
+  await Supabase.initialize(
+    url: 'https://xcpbvuzazluqfgrvkgwp.supabase.co',
+    anonKey: 'sb_publishable_u6ytLk4KbPdOulUADY3Fag_qUPfpYYf',
+  );
 
   runApp(const MyApp());
 }
