@@ -102,6 +102,7 @@ class WGData {
     currentMemberId = savedCurrentMemberId;
 
     await _loadMembers();
+    await _loadTasks();
 
     version.value++;
   }
@@ -229,6 +230,203 @@ class WGData {
 
     version.value++;
   }
+  // ============================================================
+  // TASKS
+  // ============================================================
+
+  static Future<void> _loadTasks() async {
+    if (householdId == null) {
+      return;
+    }
+
+    final response = await _supabase
+        .from('tasks')
+        .select(
+          'id, name, completed, assigned_to, due_date, repeat, sort_order',
+        )
+        .eq('household_id', householdId!)
+        .order('sort_order')
+        .order('created_at');
+
+    tasks.clear();
+
+    for (final row in response) {
+      tasks.add({
+        'id': row['id'],
+        'name': row['name'],
+        'completed': row['completed'] ?? false,
+        'assignedTo': row['assigned_to'],
+        'dueDate': row['due_date'],
+        'repeat': row['repeat'] ?? 'none',
+      });
+    }
+  }
+
+  static Future<Map<String, dynamic>?> addTask({
+    required String name,
+    String? assignedTo,
+    String? dueDate,
+    String repeat = 'none',
+  }) async {
+    if (householdId == null) {
+      return null;
+    }
+
+    final sortOrder = tasks.length;
+
+    final response = await _supabase
+        .from('tasks')
+        .insert({
+          'household_id': householdId,
+          'name': name,
+          'completed': false,
+          'assigned_to': assignedTo,
+          'due_date': dueDate,
+          'repeat': repeat,
+          'sort_order': sortOrder,
+        })
+        .select(
+          'id, name, completed, assigned_to, due_date, repeat, sort_order',
+        )
+        .single();
+
+    final task = {
+      'id': response['id'],
+      'name': response['name'],
+      'completed': response['completed'] ?? false,
+      'assignedTo': response['assigned_to'],
+      'dueDate': response['due_date'],
+      'repeat': response['repeat'] ?? 'none',
+    };
+
+    tasks.add(task);
+
+    version.value++;
+
+    return task;
+  }
+
+  static Future<void> updateTask({
+    required String id,
+    String? name,
+    bool? completed,
+    String? assignedTo,
+    bool updateAssignedTo = false,
+    String? dueDate,
+    bool updateDueDate = false,
+    String? repeat,
+  }) async {
+    if (householdId == null) {
+      return;
+    }
+
+    final updates = <String, dynamic>{};
+
+    if (name != null) {
+      updates['name'] = name;
+    }
+
+    if (completed != null) {
+      updates['completed'] = completed;
+    }
+
+    // Important:
+    // This also sends NULL to Supabase when we want to
+    // remove the assignment.
+    if (updateAssignedTo) {
+      updates['assigned_to'] = assignedTo;
+    }
+
+    // Same idea for due dates.
+    // This allows us to explicitly clear due_date.
+    if (updateDueDate) {
+      updates['due_date'] = dueDate;
+    }
+
+    if (repeat != null) {
+      updates['repeat'] = repeat;
+    }
+
+    if (updates.isEmpty) {
+      return;
+    }
+
+    await _supabase
+        .from('tasks')
+        .update(updates)
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    final index = tasks.indexWhere((task) => task['id'] == id);
+
+    if (index != -1) {
+      if (name != null) {
+        tasks[index]['name'] = name;
+      }
+
+      if (completed != null) {
+        tasks[index]['completed'] = completed;
+      }
+
+      if (updateAssignedTo) {
+        tasks[index]['assignedTo'] = assignedTo;
+      }
+
+      if (updateDueDate) {
+        tasks[index]['dueDate'] = dueDate;
+      }
+
+      if (repeat != null) {
+        tasks[index]['repeat'] = repeat;
+      }
+    }
+
+    version.value++;
+  }
+
+  static Future<void> deleteTask(String id) async {
+    if (householdId == null) {
+      return;
+    }
+
+    await _supabase
+        .from('tasks')
+        .delete()
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    tasks.removeWhere((task) => task['id'] == id);
+
+    await _saveTaskOrder();
+
+    version.value++;
+  }
+
+  static Future<void> updateTaskOrder() async {
+    if (householdId == null) {
+      return;
+    }
+
+    await _saveTaskOrder();
+
+    version.value++;
+  }
+
+  static Future<void> _saveTaskOrder() async {
+    if (householdId == null) {
+      return;
+    }
+
+    for (var index = 0; index < tasks.length; index++) {
+      final taskId = tasks[index]['id'];
+
+      await _supabase
+          .from('tasks')
+          .update({'sort_order': index})
+          .eq('id', taskId)
+          .eq('household_id', householdId!);
+    }
+  }
 
   // ============================================================
   // CURRENT MEMBER
@@ -332,8 +530,6 @@ class WGData {
     final prefs = await SharedPreferences.getInstance();
 
     await prefs.setString('shoppingItems', jsonEncode(shoppingItems));
-
-    await prefs.setString('tasks', jsonEncode(tasks));
 
     await prefs.setString('chatMessages', jsonEncode(chatMessages));
 

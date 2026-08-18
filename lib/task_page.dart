@@ -19,20 +19,25 @@ class _TaskPageState extends State<TaskPage> {
       return;
     }
 
-    setState(() {
-      WGData.tasks.add({
-        'id': DateTime.now().microsecondsSinceEpoch.toString(),
-        'name': task,
-        'completed': false,
-        'assignedTo': null,
-        'dueDate': null,
-        'repeat': 'none',
-      });
-    });
+    try {
+      await WGData.addTask(name: task);
 
-    _controller.clear();
+      _controller.clear();
 
-    await WGData.save();
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not add task: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aufgabe konnte nicht hinzugefügt werden'),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _sortTasksByDueDate() async {
@@ -166,11 +171,21 @@ class _TaskPageState extends State<TaskPage> {
       return;
     }
 
-    setState(() {
-      task['dueDate'] = pickedDate.toIso8601String();
-    });
+    final dueDate = pickedDate.toIso8601String();
 
-    await WGData.save();
+    try {
+      await WGData.updateTask(
+        id: task['id'],
+        dueDate: dueDate,
+        updateDueDate: true,
+      );
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not update task due date: $e');
+    }
   }
 
   Future<void> _pickRepeat(Map<String, dynamic> task) async {
@@ -244,11 +259,15 @@ class _TaskPageState extends State<TaskPage> {
       return;
     }
 
-    setState(() {
-      task['repeat'] = selectedRepeat;
-    });
+    try {
+      await WGData.updateTask(id: task['id'], repeat: selectedRepeat);
 
-    await WGData.save();
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not update task repeat: $e');
+    }
   }
 
   DateTime? _getNextRepeatDate(dynamic dueDate, String repeat) {
@@ -292,44 +311,52 @@ class _TaskPageState extends State<TaskPage> {
   }
 
   Future<void> _completeTask(Map<String, dynamic> task, bool completed) async {
-    if (!completed) {
-      setState(() {
-        task['completed'] = false;
-      });
+    try {
+      await WGData.updateTask(id: task['id'], completed: completed);
 
-      await WGData.save();
-      return;
-    }
+      if (!completed) {
+        if (mounted) {
+          setState(() {});
+        }
+        return;
+      }
 
-    final repeat = task['repeat'] ?? 'none';
-
-    setState(() {
-      task['completed'] = true;
+      final repeat = task['repeat'] ?? 'none';
 
       if (repeat != 'none' && task['dueDate'] != null) {
         final nextDueDate = _getNextRepeatDate(task['dueDate'], repeat);
 
         if (nextDueDate != null) {
-          WGData.tasks.add({
-            'id': DateTime.now().microsecondsSinceEpoch.toString(),
-            'name': task['name'],
-            'completed': false,
-            'assignedTo': task['assignedTo'],
-            'dueDate': nextDueDate.toIso8601String(),
-            'repeat': repeat,
-          });
+          await WGData.addTask(
+            name: task['name'],
+            assignedTo: task['assignedTo'],
+            dueDate: nextDueDate.toIso8601String(),
+            repeat: repeat,
+          );
         }
       }
-    });
 
-    await WGData.save();
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not complete task: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aufgabe konnte nicht aktualisiert werden'),
+          ),
+        );
+      }
+    }
   }
 
   void _showAssignmentDialog(Map<String, dynamic> task) {
     if (WGData.members.isEmpty) {
       showDialog(
         context: context,
-        builder: (context) {
+        builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Keine Bewohner'),
             content: const Text(
@@ -338,7 +365,7 @@ class _TaskPageState extends State<TaskPage> {
             actions: [
               TextButton(
                 onPressed: () {
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
                 },
                 child: const Text('OK'),
               ),
@@ -353,7 +380,7 @@ class _TaskPageState extends State<TaskPage> {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -371,15 +398,26 @@ class _TaskPageState extends State<TaskPage> {
                 ListTile(
                   leading: const Icon(Icons.person_off_outlined),
                   title: const Text('Niemanden zuweisen'),
+                  trailing: task['assignedTo'] == null
+                      ? const Icon(Icons.check)
+                      : null,
                   onTap: () async {
-                    setState(() {
-                      task['assignedTo'] = null;
-                    });
+                    try {
+                      await WGData.updateTask(
+                        id: task['id'],
+                        assignedTo: null,
+                        updateAssignedTo: true,
+                      );
 
-                    await WGData.save();
+                      if (mounted) {
+                        setState(() {});
+                      }
 
-                    if (context.mounted) {
-                      Navigator.pop(context);
+                      if (sheetContext.mounted) {
+                        Navigator.pop(sheetContext);
+                      }
+                    } catch (e) {
+                      debugPrint('Could not unassign task: $e');
                     }
                   },
                 ),
@@ -395,14 +433,25 @@ class _TaskPageState extends State<TaskPage> {
                     title: Text(member.name),
                     trailing: selected ? const Icon(Icons.check) : null,
                     onTap: () async {
-                      setState(() {
-                        task['assignedTo'] = member.id;
-                      });
+                      try {
+                        await WGData.updateTask(
+                          id: task['id'],
+                          assignedTo: member.id,
+                          updateAssignedTo: true,
+                        );
 
-                      await WGData.save();
+                        if (mounted) {
+                          setState(() {});
+                        }
 
-                      if (context.mounted) {
-                        Navigator.pop(context);
+                        // IMPORTANT:
+                        // Only close the bottom sheet.
+                        // Do not navigate away from TaskPage.
+                        if (sheetContext.mounted) {
+                          Navigator.pop(sheetContext);
+                        }
+                      } catch (e) {
+                        debugPrint('Could not assign task: $e');
                       }
                     },
                   );
@@ -425,22 +474,6 @@ class _TaskPageState extends State<TaskPage> {
     for (final member in WGData.members) {
       if (member.id == assignedTo) {
         return member;
-      }
-    }
-
-    return null;
-  }
-
-  String? _getAssignedMemberName(Map<String, dynamic> task) {
-    final assignedTo = task['assignedTo'];
-
-    if (assignedTo == null) {
-      return null;
-    }
-
-    for (final member in WGData.members) {
-      if (member.id == assignedTo) {
-        return member.name;
       }
     }
 
@@ -507,7 +540,7 @@ class _TaskPageState extends State<TaskPage> {
 
                         WGData.tasks.insert(newIndex, task);
 
-                        await WGData.save();
+                        await WGData.updateTaskOrder();
                       },
 
                       itemBuilder: (context, index) {
@@ -658,11 +691,33 @@ class _TaskPageState extends State<TaskPage> {
                                           if (task['dueDate'] != null)
                                             IconButton(
                                               onPressed: () async {
-                                                setState(() {
-                                                  task['dueDate'] = null;
-                                                });
+                                                try {
+                                                  await WGData.updateTask(
+                                                    id: task['id'],
+                                                    dueDate: null,
+                                                    updateDueDate: true,
+                                                  );
 
-                                                await WGData.save();
+                                                  if (mounted) {
+                                                    setState(() {});
+                                                  }
+                                                } catch (e) {
+                                                  debugPrint(
+                                                    'Could not remove task due date: $e',
+                                                  );
+
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(
+                                                      context,
+                                                    ).showSnackBar(
+                                                      const SnackBar(
+                                                        content: Text(
+                                                          'Frist konnte nicht entfernt werden',
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
+                                                }
                                               },
                                               icon: const Icon(Icons.close),
                                               iconSize: 18,
@@ -737,11 +792,26 @@ class _TaskPageState extends State<TaskPage> {
 
                                 IconButton(
                                   onPressed: () async {
-                                    setState(() {
-                                      WGData.tasks.removeAt(index);
-                                    });
+                                    try {
+                                      await WGData.deleteTask(task['id']);
 
-                                    await WGData.save();
+                                      if (mounted) {
+                                        setState(() {});
+                                      }
+                                    } catch (e) {
+                                      debugPrint('Could not delete task: $e');
+
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Aufgabe konnte nicht gelöscht werden',
+                                                ),
+                                              ),
+                                            );
+                                      }
+                                    }
                                   },
                                   icon: const Icon(Icons.delete_outline),
                                   tooltip: 'Löschen',
