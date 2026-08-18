@@ -29,33 +29,42 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    setState(() {
-      WGData.chatMessages.add({
-        'id': DateTime.now().microsecondsSinceEpoch.toString(),
-        'text': text,
-        'senderId': member.id,
-        'timestamp': DateTime.now().toIso8601String(),
-        'edited': false,
-        'replyTo': _replyingTo?['id'],
-      });
+    final replyToId = _replyingTo?['id']?.toString();
 
+    final message = await WGData.addChatMessage(
+      text: text,
+      senderId: member.id,
+      replyTo: replyToId,
+    );
+
+    if (!mounted || message == null) {
+      return;
+    }
+
+    setState(() {
       _replyingTo = null;
     });
 
     _controller.clear();
 
-    await WGData.save();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
 
-    if (_scrollController.hasClients) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
-    }
+    });
   }
 
-  WGMember? _getSender(String senderId) {
+  WGMember? _getSender(String? senderId) {
+    if (senderId == null) {
+      return null;
+    }
+
     for (final member in WGData.members) {
       if (member.id == senderId) {
         return member;
@@ -65,7 +74,11 @@ class _ChatPageState extends State<ChatPage> {
     return null;
   }
 
-  String _formatTime(String timestamp) {
+  String _formatTime(String? timestamp) {
+    if (timestamp == null) {
+      return '';
+    }
+
     final dateTime = DateTime.tryParse(timestamp);
 
     if (dateTime == null) {
@@ -119,11 +132,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _editMessage(Map<String, dynamic> message) async {
-    final controller = TextEditingController(text: message['text'] as String);
+    final controller = TextEditingController(
+      text: message['text']?.toString() ?? '',
+    );
 
     final editedText = await showDialog<String>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Nachricht bearbeiten'),
           content: TextField(
@@ -139,7 +154,7 @@ class _ChatPageState extends State<ChatPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Abbrechen'),
             ),
             FilledButton(
@@ -150,7 +165,7 @@ class _ChatPageState extends State<ChatPage> {
                   return;
                 }
 
-                Navigator.pop(context, text);
+                Navigator.pop(dialogContext, text);
               },
               child: const Text('Speichern'),
             ),
@@ -159,36 +174,35 @@ class _ChatPageState extends State<ChatPage> {
       },
     );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.dispose();
-    });
+    controller.dispose();
 
-    if (editedText == null || editedText.isEmpty) {
+    if (!mounted || editedText == null || editedText.isEmpty) {
       return;
     }
 
-    setState(() {
-      message['text'] = editedText;
-      message['edited'] = true;
-    });
+    final messageId = message['id']?.toString();
 
-    await WGData.save();
+    if (messageId == null) {
+      return;
+    }
+
+    await WGData.updateChatMessage(id: messageId, text: editedText);
   }
 
   Future<void> _deleteMessage(Map<String, dynamic> message) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Nachricht löschen?'),
           content: const Text('Diese Nachricht wird dauerhaft gelöscht.'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(dialogContext, false),
               child: const Text('Abbrechen'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Löschen'),
             ),
           ],
@@ -196,17 +210,63 @@ class _ChatPageState extends State<ChatPage> {
       },
     );
 
-    if (shouldDelete != true || !mounted) {
+    if (!mounted || shouldDelete != true) {
       return;
     }
 
+    final messageId = message['id']?.toString();
+
+    if (messageId == null) {
+      return;
+    }
+
+    // Update the UI immediately.
     setState(() {
       WGData.chatMessages.removeWhere(
-        (existingMessage) => existingMessage['id'] == message['id'],
+        (existingMessage) => existingMessage['id']?.toString() == messageId,
       );
+
+      // Any replies to the deleted message simply become
+      // normal messages without a reply preview.
+      for (final existingMessage in WGData.chatMessages) {
+        if (existingMessage['replyTo']?.toString() == messageId) {
+          existingMessage['replyTo'] = null;
+        }
+      }
+
+      _messageKeys.remove(messageId);
+
+      if (_replyingTo?['id']?.toString() == messageId) {
+        _replyingTo = null;
+      }
+
+      if (_highlightedMessageId == messageId) {
+        _highlightedMessageId = null;
+      }
     });
 
-    await WGData.save();
+    // Then update Supabase.
+    try {
+      await WGData.deleteChatMessage(messageId);
+    } catch (error) {
+      // If the database operation fails, reload the data so
+      // the local UI is brought back into sync.
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nachricht konnte nicht gelöscht werden.'),
+        ),
+      );
+
+      await WGData.initialize();
+
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 
   Future<void> _showMessageActions(
@@ -217,7 +277,7 @@ class _ChatPageState extends State<ChatPage> {
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -227,14 +287,14 @@ class _ChatPageState extends State<ChatPage> {
                   leading: const Icon(Icons.edit_outlined),
                   title: const Text('Bearbeiten'),
                   onTap: () {
-                    Navigator.pop(context, 'edit');
+                    Navigator.pop(sheetContext, 'edit');
                   },
                 ),
               ListTile(
                 leading: const Icon(Icons.reply_outlined),
                 title: const Text('Antworten'),
                 onTap: () {
-                  Navigator.pop(context, 'reply');
+                  Navigator.pop(sheetContext, 'reply');
                 },
               ),
               if (isCurrentMember)
@@ -242,7 +302,7 @@ class _ChatPageState extends State<ChatPage> {
                   leading: const Icon(Icons.delete_outline),
                   title: const Text('Löschen'),
                   onTap: () {
-                    Navigator.pop(context, 'delete');
+                    Navigator.pop(sheetContext, 'delete');
                   },
                 ),
             ],
@@ -271,9 +331,11 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      if (!mounted || !_scrollController.hasClients) {
+        return;
       }
+
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
     });
   }
 
@@ -286,34 +348,42 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildMessageReplyPreview(Map<String, dynamic> message) {
-    final replyToId = message['replyTo'];
+    final replyToId = message['replyTo']?.toString();
 
-    if (replyToId == null) {
+    if (replyToId == null || replyToId.isEmpty) {
       return const SizedBox.shrink();
     }
 
     Map<String, dynamic>? originalMessage;
 
     for (final existingMessage in WGData.chatMessages) {
-      if (existingMessage['id'] == replyToId) {
+      if (existingMessage['id']?.toString() == replyToId) {
         originalMessage = existingMessage;
         break;
       }
     }
 
+    // The original message may have been deleted.
+    // In that case, simply don't show a reply preview.
     if (originalMessage == null) {
       return const SizedBox.shrink();
     }
 
-    final originalSender = _getSender(originalMessage['senderId']);
+    final originalSender = _getSender(originalMessage['senderId']?.toString());
 
     if (originalSender == null) {
       return const SizedBox.shrink();
     }
 
+    final originalMessageId = originalMessage['id']?.toString();
+
+    if (originalMessageId == null) {
+      return const SizedBox.shrink();
+    }
+
     return GestureDetector(
       onTap: () {
-        _scrollToMessage(originalMessage!['id']);
+        _scrollToMessage(originalMessageId);
       },
       child: Container(
         width: double.infinity,
@@ -341,7 +411,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             const SizedBox(height: 2),
             Text(
-              originalMessage['text'] as String,
+              originalMessage['text']?.toString() ?? '',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -362,7 +432,7 @@ class _ChatPageState extends State<ChatPage> {
       return const SizedBox.shrink();
     }
 
-    final sender = _getSender(message['senderId']);
+    final sender = _getSender(message['senderId']?.toString());
 
     if (sender == null) {
       return const SizedBox.shrink();
@@ -389,7 +459,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  message['text'] as String,
+                  message['text']?.toString() ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -434,7 +504,10 @@ class _ChatPageState extends State<ChatPage> {
                     itemCount: WGData.chatMessages.length,
                     itemBuilder: (context, index) {
                       final message = WGData.chatMessages[index];
-                      final sender = _getSender(message['senderId']);
+
+                      final sender = _getSender(
+                        message['senderId']?.toString(),
+                      );
 
                       if (sender == null) {
                         return const SizedBox.shrink();
@@ -442,14 +515,19 @@ class _ChatPageState extends State<ChatPage> {
 
                       final isCurrentMember = currentMember?.id == sender.id;
 
-                      final isHighlighted =
-                          _highlightedMessageId == message['id'];
+                      final messageId = message['id']?.toString();
+
+                      if (messageId == null) {
+                        return const SizedBox.shrink();
+                      }
+
+                      final isHighlighted = _highlightedMessageId == messageId;
 
                       final bubbleColor = WGData.memberColor(sender)
                           .withValues(alpha: 0.20);
 
                       return Container(
-                        key: _getMessageKey(message['id']),
+                        key: _getMessageKey(messageId),
                         margin: const EdgeInsets.only(bottom: 12),
                         child: GestureDetector(
                           onLongPress: () {
@@ -521,7 +599,7 @@ class _ChatPageState extends State<ChatPage> {
                                   ],
 
                                   Text(
-                                    message['text'],
+                                    message['text']?.toString() ?? '',
                                     style: const TextStyle(fontSize: 16),
                                   ),
 
@@ -531,7 +609,9 @@ class _ChatPageState extends State<ChatPage> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Text(
-                                        _formatTime(message['timestamp']),
+                                        _formatTime(
+                                          message['timestamp']?.toString(),
+                                        ),
                                         style: TextStyle(
                                           fontSize: 11,
                                           color: Theme.of(context)

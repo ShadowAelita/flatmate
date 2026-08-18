@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -103,6 +101,7 @@ class WGData {
     await _loadMembers();
     await _loadTasks();
     await _loadShoppingItems();
+    await _loadChatMessages();
 
     version.value++;
   }
@@ -134,8 +133,6 @@ class WGData {
       );
     }
 
-    // If the locally selected member no longer exists,
-    // clear the selection.
     if (currentMemberId != null &&
         !members.any((member) => member.id == currentMemberId)) {
       currentMemberId = null;
@@ -181,6 +178,10 @@ class WGData {
     required String name,
     required int colorIndex,
   }) async {
+    if (householdId == null) {
+      return;
+    }
+
     await _supabase
         .from('members')
         .update({'name': name, 'color_index': colorIndex})
@@ -197,6 +198,10 @@ class WGData {
   }
 
   static Future<void> deleteMember(String id) async {
+    if (householdId == null) {
+      return;
+    }
+
     await _supabase
         .from('members')
         .delete()
@@ -212,8 +217,6 @@ class WGData {
       await prefs.remove('currentMemberId');
     }
 
-    // These local references will eventually also be moved
-    // to Supabase when we migrate tasks/shopping/chat.
     for (final task in tasks) {
       if (task['assignedTo'] == id) {
         task['assignedTo'] = null;
@@ -230,6 +233,7 @@ class WGData {
 
     version.value++;
   }
+
   // ============================================================
   // TASKS
   // ============================================================
@@ -330,15 +334,10 @@ class WGData {
       updates['completed'] = completed;
     }
 
-    // Important:
-    // This also sends NULL to Supabase when we want to
-    // remove the assignment.
     if (updateAssignedTo) {
       updates['assigned_to'] = assignedTo;
     }
 
-    // Same idea for due dates.
-    // This allows us to explicitly clear due_date.
     if (updateDueDate) {
       updates['due_date'] = dueDate;
     }
@@ -427,6 +426,7 @@ class WGData {
           .eq('household_id', householdId!);
     }
   }
+
   // ============================================================
   // SHOPPING
   // ============================================================
@@ -493,6 +493,10 @@ class WGData {
     String? claimedBy,
     bool clearClaimedBy = false,
   }) async {
+    if (householdId == null) {
+      return;
+    }
+
     final updates = <String, dynamic>{};
 
     if (completed != null) {
@@ -541,6 +545,10 @@ class WGData {
   }
 
   static Future<void> deleteShoppingItem(String id) async {
+    if (householdId == null) {
+      return;
+    }
+
     await _supabase
         .from('shopping_items')
         .delete()
@@ -548,6 +556,131 @@ class WGData {
         .eq('household_id', householdId!);
 
     shoppingItems.removeWhere((item) => item['id'] == id);
+
+    version.value++;
+  }
+
+  // ============================================================
+  // CHAT
+  // ============================================================
+
+  static Future<void> _loadChatMessages() async {
+    if (householdId == null) {
+      return;
+    }
+
+    final response = await _supabase
+        .from('chat_messages')
+        .select('id, text, sender_id, timestamp, edited, reply_to')
+        .eq('household_id', householdId!)
+        .order('timestamp');
+
+    chatMessages.clear();
+
+    for (final row in response) {
+      chatMessages.add({
+        'id': row['id'],
+        'text': row['text'],
+        'senderId': row['sender_id'],
+        'timestamp': row['timestamp'],
+        'edited': row['edited'] ?? false,
+        'replyTo': row['reply_to'],
+      });
+    }
+  }
+
+  static Future<Map<String, dynamic>?> addChatMessage({
+    required String text,
+    required String senderId,
+    String? replyTo,
+  }) async {
+    if (householdId == null) {
+      return null;
+    }
+
+    final response = await _supabase
+        .from('chat_messages')
+        .insert({
+          'household_id': householdId,
+          'text': text,
+          'sender_id': senderId,
+          'timestamp': DateTime.now().toIso8601String(),
+          'edited': false,
+          'reply_to': replyTo,
+        })
+        .select('id, text, sender_id, timestamp, edited, reply_to')
+        .single();
+
+    final message = {
+      'id': response['id'],
+      'text': response['text'],
+      'senderId': response['sender_id'],
+      'timestamp': response['timestamp'],
+      'edited': response['edited'] ?? false,
+      'replyTo': response['reply_to'],
+    };
+
+    chatMessages.add(message);
+
+    version.value++;
+
+    return message;
+  }
+
+  static Future<void> updateChatMessage({
+    required String id,
+    required String text,
+  }) async {
+    if (householdId == null) {
+      return;
+    }
+
+    await _supabase
+        .from('chat_messages')
+        .update({'text': text, 'edited': true})
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    final index = chatMessages.indexWhere((message) => message['id'] == id);
+
+    if (index != -1) {
+      chatMessages[index]['text'] = text;
+      chatMessages[index]['edited'] = true;
+    }
+
+    version.value++;
+  }
+
+  static Future<void> deleteChatMessage(String id) async {
+    if (householdId == null) {
+      return;
+    }
+
+    // First remove reply references to this message.
+    //
+    // This is important because a message may have other
+    // messages replying to it.
+    await _supabase
+        .from('chat_messages')
+        .update({'reply_to': null})
+        .eq('reply_to', id)
+        .eq('household_id', householdId!);
+
+    // Now delete the original message.
+    await _supabase
+        .from('chat_messages')
+        .delete()
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    // Keep our local cache in sync.
+    chatMessages.removeWhere((message) => message['id'] == id);
+
+    for (final message in chatMessages) {
+      if (message['replyTo'] == id) {
+        message['replyTo'] = null;
+      }
+    }
 
     version.value++;
   }
@@ -641,19 +774,15 @@ class WGData {
   }
 
   // ============================================================
-  // LEGACY LOCAL SAVE
+  // SAVE
   // ============================================================
   //
-  // We keep this temporarily for chat because chat has not
-  // been migrated to Supabase yet.
-  //
-  // Members, tasks and shopping are stored in Supabase.
+  // Chat, tasks, shopping and members are now stored in Supabase.
+  // Only the locally selected member still needs SharedPreferences.
   //
 
   static Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
-
-    await prefs.setString('chatMessages', jsonEncode(chatMessages));
 
     if (currentMemberId != null) {
       await prefs.setString('currentMemberId', currentMemberId!);
