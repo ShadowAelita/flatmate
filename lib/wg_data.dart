@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -21,15 +25,22 @@ class WGData {
   static final List<Map<String, dynamic>> chatMessages = [];
 
   static String? householdId;
+  static String? currentMemberId;
 
   static final ValueNotifier<int> version = ValueNotifier<int>(0);
 
   static final SupabaseClient _supabase = Supabase.instance.client;
-  static RealtimeChannel? _householdChannel;
-  static RealtimeChannel? _membersChannel;
-  static RealtimeChannel? _tasksChannel;
-  static RealtimeChannel? _shoppingChannel;
-  static RealtimeChannel? _chatChannel;
+
+  static SharedPreferences? _prefs;
+
+  static RealtimeChannel? _realtimeChannel;
+
+  static Future<void>? _initializationFuture;
+  static Future<void>? _syncFuture;
+
+  static bool _isOnline = false;
+  static const String _pendingOperationsKey = 'wg_pending_operations';
+  static const String _cachePrefix = 'wg_cache_';
 
   static const List<Color> memberColors = [
     Colors.red,
@@ -40,7 +51,8 @@ class WGData {
     Colors.purple,
   ];
 
-  static String? currentMemberId;
+  static bool get isOnline => _isOnline;
+  static bool get hasPendingOperations => _readPendingOperations().isNotEmpty;
 
   static Color memberColor(WGMember member) {
     return memberColors[member.colorIndex % memberColors.length];
@@ -61,410 +73,529 @@ class WGData {
   }
 
   // ============================================================
-  // HOUSEHOLD
-  // ============================================================
-
-  static Future<void> _initializeHousehold() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final savedHouseholdId = prefs.getString('householdId');
-
-    if (savedHouseholdId != null) {
-      householdId = savedHouseholdId;
-      return;
-    }
-
-    final response = await _supabase
-        .from('households')
-        .insert({'name': 'Unsere WG'})
-        .select()
-        .single();
-
-    householdId = response['id'] as String;
-
-    await prefs.setString('householdId', householdId!);
-  }
-
-  static Future<void> _unsubscribeFromRealtime() async {
-    final channels = [
-      _householdChannel,
-      _membersChannel,
-      _tasksChannel,
-      _shoppingChannel,
-      _chatChannel,
-    ];
-
-    for (final channel in channels) {
-      if (channel != null) {
-        await _supabase.removeChannel(channel);
-      }
-    }
-
-    _householdChannel = null;
-    _membersChannel = null;
-    _tasksChannel = null;
-    _shoppingChannel = null;
-    _chatChannel = null;
-  }
-  // ============================================================
   // INITIALIZATION
   // ============================================================
 
-  static Future<void> initialize() async {
-    await _initializeHousehold();
+  static Future<void> initialize() {
+    if (_initializationFuture != null) {
+      return _initializationFuture!;
+    }
 
-    final prefs = await SharedPreferences.getInstance();
+    final future = _initializeInternal();
 
-    final savedCurrentMemberId = prefs.getString('currentMemberId');
+    _initializationFuture = future;
 
-    members.clear();
-    shoppingItems.clear();
-    tasks.clear();
-    chatMessages.clear();
+    future.whenComplete(() {
+      if (identical(_initializationFuture, future)) {
+        _initializationFuture = null;
+      }
+    });
 
-    currentMemberId = savedCurrentMemberId;
-
-    await _loadMembers();
-    await _loadTasks();
-    await _loadShoppingItems();
-    await _loadChatMessages();
-
-    await _unsubscribeFromRealtime();
-    await _subscribeToRealtime();
-
-    version.value++;
+    return future;
   }
 
-  static void _handleMembersRealtime(
-    PostgresChangePayload payload,
-    String currentHouseholdId,
-  ) {
-    final newRecord = payload.newRecord;
-    final oldRecord = payload.oldRecord;
+  static Future<void> _initializeInternal() async {
+    _prefs ??= await SharedPreferences.getInstance();
 
-    final householdFromNew = newRecord['household_id']?.toString();
-    final householdFromOld = oldRecord['household_id']?.toString();
+    final prefs = _prefs!;
 
-    if (householdFromNew != currentHouseholdId &&
-        householdFromOld != currentHouseholdId) {
+    householdId = prefs.getString('householdId');
+    currentMemberId = prefs.getString('currentMemberId');
+
+    // ------------------------------------------------------------
+    // IMPORTANT:
+    // Load local data FIRST.
+    //
+    // The UI therefore has something to display even when:
+    // - the phone is offline
+    // - Supabase is slow
+    // - Realtime is unavailable
+    // ------------------------------------------------------------
+
+    _loadCache();
+
+    version.value++;
+
+    // Existing household:
+    // immediately show cached state and synchronize in background.
+    if (householdId != null) {
+      await _subscribeToRealtime();
+
+      unawaited(_syncOnline());
       return;
     }
 
-    final memberId = (newRecord['id'] ?? oldRecord['id'])?.toString();
+    // First installation with no household yet.
+    //
+    // We cannot create a household offline, so this is the only
+    // situation where startup may need to contact Supabase.
+    try {
+      final response = await _supabase
+          .from('households')
+          .insert({'name': 'Unsere WG'})
+          .select()
+          .single()
+          .timeout(const Duration(seconds: 6));
 
-    if (memberId == null) {
+      householdId = response['id'] as String;
+
+      await prefs.setString('householdId', householdId!);
+
+      await _subscribeToRealtime();
+
+      unawaited(_syncOnline());
+    } catch (error) {
+      debugPrint('Could not create household: $error');
+
+      // The application still starts.
+      // There simply isn't any household data yet.
+      _isOnline = false;
+      version.value++;
+    }
+  }
+
+  // ============================================================
+  // LOCAL CACHE
+  // ============================================================
+
+  static String get _cacheKey {
+    final id = householdId;
+
+    if (id == null) {
+      return '';
+    }
+
+    return '$_cachePrefix$id';
+  }
+
+  static void _loadCache() {
+    final key = _cacheKey;
+
+    if (key.isEmpty || _prefs == null) {
       return;
     }
 
-    switch (payload.eventType) {
-      case PostgresChangeEvent.insert:
-        final alreadyExists = members.any((member) => member.id == memberId);
+    try {
+      final raw = _prefs!.getString(key);
 
-        if (alreadyExists) {
-          return;
-        }
+      if (raw == null || raw.isEmpty) {
+        return;
+      }
 
-        members.add(
-          WGMember(
-            id: memberId,
-            name: newRecord['name']?.toString() ?? '',
-            colorIndex: newRecord['color_index'] as int? ?? 0,
-          ),
-        );
+      final decoded = jsonDecode(raw);
 
-        version.value++;
-        break;
+      if (decoded is! Map) {
+        return;
+      }
 
-      case PostgresChangeEvent.update:
-        final index = members.indexWhere((member) => member.id == memberId);
+      final cached = Map<String, dynamic>.from(decoded);
 
-        if (index == -1) {
+      // MEMBERS
+      members.clear();
+
+      final cachedMembers = cached['members'];
+
+      if (cachedMembers is List) {
+        for (final row in cachedMembers) {
+          if (row is! Map) {
+            continue;
+          }
+
           members.add(
             WGMember(
-              id: memberId,
-              name: newRecord['name']?.toString() ?? '',
-              colorIndex: newRecord['color_index'] as int? ?? 0,
+              id: row['id'].toString(),
+              name: row['name']?.toString() ?? '',
+              colorIndex: row['colorIndex'] as int? ?? 0,
             ),
           );
-        } else {
-          members[index] = WGMember(
-            id: memberId,
-            name: newRecord['name']?.toString() ?? '',
-            colorIndex: newRecord['color_index'] as int? ?? 0,
-          );
         }
+      }
 
-        version.value++;
-        break;
+      // TASKS
+      tasks.clear();
 
-      case PostgresChangeEvent.delete:
-        members.removeWhere((member) => member.id == memberId);
+      final cachedTasks = cached['tasks'];
 
-        if (currentMemberId == memberId) {
-          currentMemberId = null;
-        }
-
-        version.value++;
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  static void _handleHouseholdRealtime(
-    PostgresChangePayload payload,
-    String currentHouseholdId,
-  ) {
-    final newRecord = payload.newRecord;
-    final oldRecord = payload.oldRecord;
-
-    final householdIdFromNew = newRecord['id']?.toString();
-    final householdIdFromOld = oldRecord['id']?.toString();
-
-    if (householdIdFromNew != currentHouseholdId &&
-        householdIdFromOld != currentHouseholdId) {
-      return;
-    }
-
-    version.value++;
-  }
-
-  static void _handleTasksRealtime(
-    PostgresChangePayload payload,
-    String currentHouseholdId,
-  ) {
-    final newRecord = payload.newRecord;
-    final oldRecord = payload.oldRecord;
-
-    final householdFromNew = newRecord['household_id']?.toString();
-    final householdFromOld = oldRecord['household_id']?.toString();
-
-    if (householdFromNew != currentHouseholdId &&
-        householdFromOld != currentHouseholdId) {
-      return;
-    }
-
-    final taskId = (newRecord['id'] ?? oldRecord['id'])?.toString();
-
-    if (taskId == null) {
-      return;
-    }
-
-    switch (payload.eventType) {
-      case PostgresChangeEvent.insert:
-        final alreadyExists = tasks.any(
-          (task) => task['id']?.toString() == taskId,
-        );
-
-        if (alreadyExists) {
-          return;
-        }
-
-        tasks.add({
-          'id': taskId,
-          'name': newRecord['name'],
-          'completed': newRecord['completed'] ?? false,
-          'assignedTo': newRecord['assigned_to'],
-          'dueDate': newRecord['due_date'],
-          'repeat': newRecord['repeat'] ?? 'none',
-        });
-
-        version.value++;
-        break;
-
-      case PostgresChangeEvent.update:
-        final index = tasks.indexWhere(
-          (task) => task['id']?.toString() == taskId,
-        );
-
-        final updatedTask = {
-          'id': taskId,
-          'name': newRecord['name'],
-          'completed': newRecord['completed'] ?? false,
-          'assignedTo': newRecord['assigned_to'],
-          'dueDate': newRecord['due_date'],
-          'repeat': newRecord['repeat'] ?? 'none',
-        };
-
-        if (index == -1) {
-          tasks.add(updatedTask);
-        } else {
-          tasks[index] = updatedTask;
-        }
-
-        version.value++;
-        break;
-
-      case PostgresChangeEvent.delete:
-        tasks.removeWhere((task) => task['id']?.toString() == taskId);
-
-        version.value++;
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  static void _handleShoppingRealtime(
-    PostgresChangePayload payload,
-    String currentHouseholdId,
-  ) {
-    final newRecord = payload.newRecord;
-    final oldRecord = payload.oldRecord;
-
-    final householdFromNew = newRecord['household_id']?.toString();
-    final householdFromOld = oldRecord['household_id']?.toString();
-
-    if (householdFromNew != currentHouseholdId &&
-        householdFromOld != currentHouseholdId) {
-      return;
-    }
-
-    final itemId = (newRecord['id'] ?? oldRecord['id'])?.toString();
-
-    if (itemId == null) {
-      return;
-    }
-
-    switch (payload.eventType) {
-      case PostgresChangeEvent.insert:
-        final alreadyExists = shoppingItems.any(
-          (item) => item['id']?.toString() == itemId,
-        );
-
-        if (alreadyExists) {
-          return;
-        }
-
-        shoppingItems.add({
-          'id': itemId,
-          'name': newRecord['name'],
-          'completed': newRecord['completed'] ?? false,
-          'quantity': newRecord['quantity'] ?? 1,
-          'claimedBy': newRecord['claimed_by'],
-        });
-
-        version.value++;
-        break;
-
-      case PostgresChangeEvent.update:
-        final index = shoppingItems.indexWhere(
-          (item) => item['id']?.toString() == itemId,
-        );
-
-        final updatedItem = {
-          'id': itemId,
-          'name': newRecord['name'],
-          'completed': newRecord['completed'] ?? false,
-          'quantity': newRecord['quantity'] ?? 1,
-          'claimedBy': newRecord['claimed_by'],
-        };
-
-        if (index == -1) {
-          shoppingItems.add(updatedItem);
-        } else {
-          shoppingItems[index] = updatedItem;
-        }
-
-        version.value++;
-        break;
-
-      case PostgresChangeEvent.delete:
-        shoppingItems.removeWhere((item) => item['id']?.toString() == itemId);
-
-        version.value++;
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  static void _handleChatRealtime(
-    PostgresChangePayload payload,
-    String currentHouseholdId,
-  ) {
-    final newRecord = payload.newRecord;
-    final oldRecord = payload.oldRecord;
-
-    final householdFromNew = newRecord['household_id']?.toString();
-    final householdFromOld = oldRecord['household_id']?.toString();
-
-    if (householdFromNew != currentHouseholdId &&
-        householdFromOld != currentHouseholdId) {
-      return;
-    }
-
-    final messageId = (newRecord['id'] ?? oldRecord['id'])?.toString();
-
-    if (messageId == null) {
-      return;
-    }
-
-    switch (payload.eventType) {
-      case PostgresChangeEvent.insert:
-        final alreadyExists = chatMessages.any(
-          (message) => message['id']?.toString() == messageId,
-        );
-
-        if (alreadyExists) {
-          return;
-        }
-
-        chatMessages.add({
-          'id': messageId,
-          'text': newRecord['text'],
-          'senderId': newRecord['sender_id'],
-          'timestamp': newRecord['timestamp'],
-          'edited': newRecord['edited'] ?? false,
-          'replyTo': newRecord['reply_to'],
-        });
-
-        version.value++;
-        break;
-
-      case PostgresChangeEvent.update:
-        final index = chatMessages.indexWhere(
-          (message) => message['id']?.toString() == messageId,
-        );
-
-        final updatedMessage = {
-          'id': messageId,
-          'text': newRecord['text'],
-          'senderId': newRecord['sender_id'],
-          'timestamp': newRecord['timestamp'],
-          'edited': newRecord['edited'] ?? false,
-          'replyTo': newRecord['reply_to'],
-        };
-
-        if (index == -1) {
-          chatMessages.add(updatedMessage);
-        } else {
-          chatMessages[index] = updatedMessage;
-        }
-
-        version.value++;
-        break;
-
-      case PostgresChangeEvent.delete:
-        chatMessages.removeWhere(
-          (message) => message['id']?.toString() == messageId,
-        );
-
-        for (final message in chatMessages) {
-          if (message['replyTo']?.toString() == messageId) {
-            message['replyTo'] = null;
+      if (cachedTasks is List) {
+        for (final row in cachedTasks) {
+          if (row is Map) {
+            tasks.add(Map<String, dynamic>.from(row));
           }
         }
+      }
 
-        version.value++;
+      // SHOPPING
+      shoppingItems.clear();
+
+      final cachedShopping = cached['shoppingItems'];
+
+      if (cachedShopping is List) {
+        for (final row in cachedShopping) {
+          if (row is Map) {
+            shoppingItems.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      // CHAT
+      chatMessages.clear();
+
+      final cachedChat = cached['chatMessages'];
+
+      if (cachedChat is List) {
+        for (final row in cachedChat) {
+          if (row is Map) {
+            chatMessages.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      _sortTasksLocally();
+    } catch (error) {
+      debugPrint('Could not load local cache: $error');
+    }
+  }
+
+  static Future<void> _saveCache() async {
+    if (_prefs == null || householdId == null) {
+      return;
+    }
+
+    try {
+      final data = <String, dynamic>{
+        'savedAt': DateTime.now().toIso8601String(),
+        'members': members
+            .map(
+              (member) => {
+                'id': member.id,
+                'name': member.name,
+                'colorIndex': member.colorIndex,
+              },
+            )
+            .toList(),
+        'tasks': tasks.map(Map<String, dynamic>.from).toList(),
+        'shoppingItems': shoppingItems.map(Map<String, dynamic>.from).toList(),
+        'chatMessages': chatMessages.map(Map<String, dynamic>.from).toList(),
+      };
+
+      await _prefs!.setString(_cacheKey, jsonEncode(data));
+    } catch (error) {
+      debugPrint('Could not save local cache: $error');
+    }
+  }
+
+  static void _notifyAndCache() {
+    version.value++;
+
+    // Never make UI updates wait for disk I/O.
+    unawaited(_saveCache());
+  }
+
+  // ============================================================
+  // UUID
+  // ============================================================
+
+  static String _newId() {
+    final random = Random.secure();
+
+    String hex(int count) {
+      return List.generate(
+        count,
+        (_) => random.nextInt(16).toRadixString(16),
+      ).join();
+    }
+
+    return '${hex(8)}-'
+        '${hex(4)}-'
+        '4${hex(3)}-'
+        '${(8 + random.nextInt(4)).toRadixString(16)}${hex(3)}-'
+        '${hex(12)}';
+  }
+
+  // ============================================================
+  // PENDING OFFLINE OPERATIONS
+  // ============================================================
+
+  static List<Map<String, dynamic>> _readPendingOperations() {
+    if (_prefs == null) {
+      return [];
+    }
+
+    try {
+      final raw = _prefs!.getString(_pendingOperationsKey);
+
+      if (raw == null || raw.isEmpty) {
+        return [];
+      }
+
+      final decoded = jsonDecode(raw);
+
+      if (decoded is! List) {
+        return [];
+      }
+
+      return decoded
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    } catch (error) {
+      debugPrint('Could not read pending operations: $error');
+      return [];
+    }
+  }
+
+  static Future<void> _writePendingOperations(
+    List<Map<String, dynamic>> operations,
+  ) async {
+    if (_prefs == null) {
+      return;
+    }
+
+    await _prefs!.setString(_pendingOperationsKey, jsonEncode(operations));
+  }
+
+  static Future<void> _queueOperation(
+    String type,
+    Map<String, dynamic> data,
+  ) async {
+    final operations = _readPendingOperations();
+
+    operations.add({
+      'type': type,
+      'data': data,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+
+    await _writePendingOperations(operations);
+  }
+
+  static Future<void> _flushPendingOperations() async {
+    if (householdId == null || _syncFuture != null) {
+      return;
+    }
+
+    final operations = _readPendingOperations();
+
+    if (operations.isEmpty) {
+      return;
+    }
+
+    final remaining = <Map<String, dynamic>>[];
+
+    for (var index = 0; index < operations.length; index++) {
+      final operation = operations[index];
+
+      try {
+        await _executeOperation(operation);
+      } catch (error) {
+        debugPrint('Offline operation failed; keeping it queued: $error');
+
+        remaining.addAll(operations.sublist(index));
+        break;
+      }
+    }
+
+    await _writePendingOperations(remaining);
+  }
+
+  static Future<void> _executeOperation(Map<String, dynamic> operation) async {
+    final type = operation['type']?.toString();
+    final data = Map<String, dynamic>.from(operation['data'] as Map);
+
+    switch (type) {
+      // ----------------------------------------------------------
+      // MEMBERS
+      // ----------------------------------------------------------
+
+      case 'member_insert':
+        await _supabase.from('members').insert(data);
+        break;
+
+      case 'member_update':
+        await _supabase
+            .from('members')
+            .update(Map<String, dynamic>.from(data['updates'] as Map))
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'member_delete':
+        await _supabase
+            .from('members')
+            .delete()
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      // ----------------------------------------------------------
+      // TASKS
+      // ----------------------------------------------------------
+
+      case 'task_insert':
+        await _supabase.from('tasks').insert(data);
+        break;
+
+      case 'task_update':
+        await _supabase
+            .from('tasks')
+            .update(Map<String, dynamic>.from(data['updates'] as Map))
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'task_delete':
+        await _supabase
+            .from('tasks')
+            .delete()
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'task_order':
+        final orders = data['orders'];
+
+        if (orders is List) {
+          for (final entry in orders) {
+            final row = Map<String, dynamic>.from(entry as Map);
+
+            await _supabase
+                .from('tasks')
+                .update({'sort_order': row['sortOrder']})
+                .eq('id', row['id'])
+                .eq('household_id', householdId!);
+          }
+        }
+        break;
+
+      // ----------------------------------------------------------
+      // SHOPPING
+      // ----------------------------------------------------------
+
+      case 'shopping_insert':
+        await _supabase.from('shopping_items').insert(data);
+        break;
+
+      case 'shopping_update':
+        await _supabase
+            .from('shopping_items')
+            .update(Map<String, dynamic>.from(data['updates'] as Map))
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'shopping_delete':
+        await _supabase
+            .from('shopping_items')
+            .delete()
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      // ----------------------------------------------------------
+      // CHAT
+      // ----------------------------------------------------------
+
+      case 'chat_insert':
+        await _supabase.from('chat_messages').insert(data);
+        break;
+
+      case 'chat_update':
+        await _supabase
+            .from('chat_messages')
+            .update(Map<String, dynamic>.from(data['updates'] as Map))
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'chat_delete':
+        await _supabase
+            .from('chat_messages')
+            .update({'reply_to': null})
+            .eq('reply_to', data['id'])
+            .eq('household_id', householdId!);
+
+        await _supabase
+            .from('chat_messages')
+            .delete()
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
         break;
 
       default:
-        break;
+        throw Exception('Unknown offline operation: $type');
     }
+  }
+
+  // ============================================================
+  // ONLINE SYNC
+  // ============================================================
+
+  static Future<void> _syncOnline() {
+    if (_syncFuture != null) {
+      return _syncFuture!;
+    }
+
+    final future = _syncOnlineInternal();
+
+    _syncFuture = future;
+
+    future.whenComplete(() {
+      if (identical(_syncFuture, future)) {
+        _syncFuture = null;
+      }
+    });
+
+    return future;
+  }
+
+  static Future<void> _syncOnlineInternal() async {
+    if (householdId == null) {
+      return;
+    }
+
+    try {
+      // Pending local changes MUST reach the server before we
+      // replace the local cache with server data.
+      await _flushPendingOperations();
+
+      await Future.wait([
+        _loadMembers(),
+        _loadTasks(),
+        _loadShoppingItems(),
+        _loadChatMessages(),
+      ]).timeout(const Duration(seconds: 8));
+
+      _isOnline = true;
+
+      await _saveCache();
+
+      version.value++;
+    } catch (error) {
+      _isOnline = false;
+
+      debugPrint('Online synchronization failed: $error');
+
+      // Keep the cached state.
+      version.value++;
+    }
+  }
+
+  // ============================================================
+  // REALTIME
+  // ============================================================
+
+  static Future<void> _unsubscribeFromRealtime() async {
+    final channel = _realtimeChannel;
+
+    if (channel != null) {
+      try {
+        await _supabase.removeChannel(channel);
+      } catch (error) {
+        debugPrint('Could not remove Realtime channel: $error');
+      }
+    }
+
+    _realtimeChannel = null;
   }
 
   static Future<void> _subscribeToRealtime() async {
@@ -472,96 +603,394 @@ class WGData {
       return;
     }
 
+    await _unsubscribeFromRealtime();
+
     final currentHouseholdId = householdId!;
 
-    // ============================================================
-    // HOUSEHOLDS
-    // ============================================================
+    final channel = _supabase.channel('wg-household-$currentHouseholdId');
 
-    _householdChannel = _supabase
-        .channel('household-$currentHouseholdId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'households',
-          callback: (payload) {
-            _handleHouseholdRealtime(payload, currentHouseholdId);
-          },
-        )
-        .subscribe();
-
-    // ============================================================
+    // ------------------------------------------------------------
     // MEMBERS
-    // ============================================================
+    // ------------------------------------------------------------
 
-    _membersChannel = _supabase
-        .channel('members-$currentHouseholdId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'members',
-          callback: (payload) {
-            _handleMembersRealtime(payload, currentHouseholdId);
-          },
-        )
-        .subscribe();
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'members',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleMembersRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
 
-    // ============================================================
+    // ------------------------------------------------------------
     // TASKS
-    // ============================================================
+    // ------------------------------------------------------------
 
-    _tasksChannel = _supabase
-        .channel('tasks-$currentHouseholdId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'tasks',
-          callback: (payload) {
-            _handleTasksRealtime(payload, currentHouseholdId);
-          },
-        )
-        .subscribe();
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'tasks',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleTasksRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
 
-    // ============================================================
+    // ------------------------------------------------------------
     // SHOPPING
-    // ============================================================
+    // ------------------------------------------------------------
 
-    _shoppingChannel = _supabase
-        .channel('shopping-$currentHouseholdId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'shopping_items',
-          callback: (payload) {
-            _handleShoppingRealtime(payload, currentHouseholdId);
-          },
-        )
-        .subscribe();
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'shopping_items',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleShoppingRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
 
-    // ============================================================
+    // ------------------------------------------------------------
     // CHAT
-    // ============================================================
+    // ------------------------------------------------------------
 
-    _chatChannel = _supabase
-        .channel('chat-$currentHouseholdId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'chat_messages',
-          callback: (payload) {
-            _handleChatRealtime(payload, currentHouseholdId);
-          },
-        )
-        .subscribe();
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'chat_messages',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleChatRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    _realtimeChannel = channel;
+
+    channel.subscribe((status, error) {
+      debugPrint('Realtime status: $status${error == null ? '' : ' / $error'}');
+
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        _isOnline = true;
+
+        unawaited(_syncOnline());
+      }
+    });
   }
+
+  static void _deferRealtime(VoidCallback callback) {
+    // Do not mutate lists synchronously from inside a Realtime
+    // callback while Flutter may be building widgets.
+    scheduleMicrotask(callback);
+  }
+
   // ============================================================
-  // MEMBERS
+  // REALTIME HANDLERS
+  // ============================================================
+
+  static bool _belongsToHousehold(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final newHousehold = payload.newRecord['household_id']?.toString();
+    final oldHousehold = payload.oldRecord['household_id']?.toString();
+
+    return newHousehold == currentHouseholdId ||
+        oldHousehold == currentHouseholdId;
+  }
+
+  static void _handleMembersRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final id = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (members.any((member) => member.id == id)) {
+          return;
+        }
+
+        members.add(
+          WGMember(
+            id: id,
+            name: newRecord['name']?.toString() ?? '',
+            colorIndex: newRecord['color_index'] as int? ?? 0,
+          ),
+        );
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = members.indexWhere((member) => member.id == id);
+
+        final updated = WGMember(
+          id: id,
+          name: newRecord['name']?.toString() ?? '',
+          colorIndex: newRecord['color_index'] as int? ?? 0,
+        );
+
+        if (index == -1) {
+          members.add(updated);
+        } else {
+          members[index] = updated;
+        }
+        break;
+
+      case PostgresChangeEvent.delete:
+        members.removeWhere((member) => member.id == id);
+
+        if (currentMemberId == id) {
+          currentMemberId = null;
+
+          unawaited(_prefs?.remove('currentMemberId'));
+        }
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handleTasksRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final id = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (tasks.any((task) => task['id']?.toString() == id)) {
+          return;
+        }
+
+        tasks.add(_taskFromRow(newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = tasks.indexWhere((task) => task['id']?.toString() == id);
+
+        final existingSortOrder = index == -1
+            ? null
+            : tasks[index]['sortOrder'];
+
+        final updated = _taskFromRow(
+          newRecord,
+          fallbackSortOrder: existingSortOrder,
+        );
+
+        if (index == -1) {
+          tasks.add(updated);
+        } else {
+          tasks[index] = updated;
+        }
+        break;
+
+      case PostgresChangeEvent.delete:
+        tasks.removeWhere((task) => task['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _sortTasksLocally();
+    _notifyAndCache();
+  }
+
+  static void _handleShoppingRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final id = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (shoppingItems.any((item) => item['id']?.toString() == id)) {
+          return;
+        }
+
+        shoppingItems.add(_shoppingFromRow(newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = shoppingItems.indexWhere(
+          (item) => item['id']?.toString() == id,
+        );
+
+        final updated = _shoppingFromRow(newRecord);
+
+        if (index == -1) {
+          shoppingItems.add(updated);
+        } else {
+          shoppingItems[index] = updated;
+        }
+        break;
+
+      case PostgresChangeEvent.delete:
+        shoppingItems.removeWhere((item) => item['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handleChatRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final id = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (chatMessages.any((message) => message['id']?.toString() == id)) {
+          return;
+        }
+
+        chatMessages.add(_chatFromRow(newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = chatMessages.indexWhere(
+          (message) => message['id']?.toString() == id,
+        );
+
+        final updated = _chatFromRow(newRecord);
+
+        if (index == -1) {
+          chatMessages.add(updated);
+        } else {
+          chatMessages[index] = updated;
+        }
+        break;
+
+      case PostgresChangeEvent.delete:
+        chatMessages.removeWhere((message) => message['id']?.toString() == id);
+
+        for (final message in chatMessages) {
+          if (message['replyTo']?.toString() == id) {
+            message['replyTo'] = null;
+          }
+        }
+        break;
+
+      default:
+        return;
+    }
+
+    chatMessages.sort((a, b) {
+      final aTime = DateTime.tryParse(a['timestamp']?.toString() ?? '');
+
+      final bTime = DateTime.tryParse(b['timestamp']?.toString() ?? '');
+
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return -1;
+      if (bTime == null) return 1;
+
+      return aTime.compareTo(bTime);
+    });
+
+    _notifyAndCache();
+  }
+
+  // ============================================================
+  // ROW CONVERTERS
+  // ============================================================
+
+  static Map<String, dynamic> _taskFromRow(
+    Map<String, dynamic> row, {
+    dynamic fallbackSortOrder,
+  }) {
+    return {
+      'id': row['id'],
+      'name': row['name'],
+      'completed': row['completed'] ?? false,
+      'assignedTo': row['assigned_to'],
+      'dueDate': row['due_date'],
+      'repeat': row['repeat'] ?? 'none',
+      'sortOrder': row['sort_order'] ?? fallbackSortOrder ?? 0,
+    };
+  }
+
+  static Map<String, dynamic> _shoppingFromRow(Map<String, dynamic> row) {
+    return {
+      'id': row['id'],
+      'name': row['name'],
+      'completed': row['completed'] ?? false,
+      'quantity': row['quantity'] ?? 1,
+      'claimedBy': row['claimed_by'],
+    };
+  }
+
+  static Map<String, dynamic> _chatFromRow(Map<String, dynamic> row) {
+    return {
+      'id': row['id'],
+      'text': row['text'],
+      'senderId': row['sender_id'],
+      'timestamp': row['timestamp'],
+      'edited': row['edited'] ?? false,
+      'replyTo': row['reply_to'],
+    };
+  }
+
+  // ============================================================
+  // SERVER LOAD
   // ============================================================
 
   static Future<void> _loadMembers() async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
     final response = await _supabase
         .from('members')
@@ -584,11 +1013,129 @@ class WGData {
     if (currentMemberId != null &&
         !members.any((member) => member.id == currentMemberId)) {
       currentMemberId = null;
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('currentMemberId');
+      await _prefs?.remove('currentMemberId');
     }
   }
+
+  static Future<void> _loadTasks() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('tasks')
+        .select(
+          'id, name, completed, assigned_to, due_date, repeat, sort_order',
+        )
+        .eq('household_id', householdId!)
+        .order('sort_order')
+        .order('created_at');
+
+    tasks.clear();
+
+    for (final row in response) {
+      tasks.add(_taskFromRow(row));
+    }
+
+    _sortTasksLocally();
+  }
+
+  static Future<void> _loadShoppingItems() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('shopping_items')
+        .select('id, name, completed, quantity, claimed_by, created_at')
+        .eq('household_id', householdId!)
+        .order('created_at');
+
+    shoppingItems.clear();
+
+    for (final row in response) {
+      shoppingItems.add(_shoppingFromRow(row));
+    }
+  }
+
+  static Future<void> _loadChatMessages() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('chat_messages')
+        .select('id, text, sender_id, timestamp, edited, reply_to')
+        .eq('household_id', householdId!)
+        .order('timestamp');
+
+    chatMessages.clear();
+
+    for (final row in response) {
+      chatMessages.add(_chatFromRow(row));
+    }
+  }
+
+  // ============================================================
+  // TASK ORDER
+  // ============================================================
+
+  static void _sortTasksLocally() {
+    tasks.sort((a, b) {
+      final aOrder = a['sortOrder'];
+      final bOrder = b['sortOrder'];
+
+      final aInt = aOrder is num ? aOrder.toInt() : 0;
+      final bInt = bOrder is num ? bOrder.toInt() : 0;
+
+      return aInt.compareTo(bInt);
+    });
+  }
+
+  static Future<void> _saveTaskOrder() async {
+    if (householdId == null) {
+      return;
+    }
+
+    final orders = <Map<String, dynamic>>[];
+
+    for (var index = 0; index < tasks.length; index++) {
+      final taskId = tasks[index]['id'];
+
+      tasks[index]['sortOrder'] = index;
+
+      orders.add({'id': taskId, 'sortOrder': index});
+    }
+
+    try {
+      for (final order in orders) {
+        await _supabase
+            .from('tasks')
+            .update({'sort_order': order['sortOrder']})
+            .eq('id', order['id'])
+            .eq('household_id', householdId!);
+      }
+
+      _isOnline = true;
+      await _saveCache();
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('task_order', {'orders': orders});
+
+      await _saveCache();
+    }
+  }
+
+  static Future<void> updateTaskOrder() async {
+    _sortTasksLocally();
+
+    for (var index = 0; index < tasks.length; index++) {
+      tasks[index]['sortOrder'] = index;
+    }
+
+    _notifyAndCache();
+
+    await _saveTaskOrder();
+  }
+
+  // ============================================================
+  // MEMBERS
+  // ============================================================
 
   static Future<WGMember?> addMember({
     required String name,
@@ -598,25 +1145,27 @@ class WGData {
       return null;
     }
 
-    final response = await _supabase
-        .from('members')
-        .insert({
-          'household_id': householdId,
-          'name': name,
-          'color_index': colorIndex,
-        })
-        .select('id, name, color_index')
-        .single();
+    final id = _newId();
 
-    final member = WGMember(
-      id: response['id'] as String,
-      name: response['name'] as String,
-      colorIndex: response['color_index'] as int? ?? 0,
-    );
+    final member = WGMember(id: id, name: name, colorIndex: colorIndex);
 
     members.add(member);
+    _notifyAndCache();
 
-    version.value++;
+    final data = {
+      'id': id,
+      'household_id': householdId,
+      'name': name,
+      'color_index': colorIndex,
+    };
+
+    try {
+      await _supabase.from('members').insert(data);
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+      await _queueOperation('member_insert', data);
+    }
 
     return member;
   }
@@ -626,43 +1175,41 @@ class WGData {
     required String name,
     required int colorIndex,
   }) async {
-    if (householdId == null) {
-      return;
-    }
-
-    await _supabase
-        .from('members')
-        .update({'name': name, 'color_index': colorIndex})
-        .eq('id', id)
-        .eq('household_id', householdId!);
+    if (householdId == null) return;
 
     final index = members.indexWhere((member) => member.id == id);
 
     if (index != -1) {
       members[index] = WGMember(id: id, name: name, colorIndex: colorIndex);
+
+      _notifyAndCache();
     }
 
-    version.value++;
+    final updates = {'name': name, 'color_index': colorIndex};
+
+    try {
+      await _supabase
+          .from('members')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('member_update', {'id': id, 'updates': updates});
+    }
   }
 
   static Future<void> deleteMember(String id) async {
-    if (householdId == null) {
-      return;
-    }
-
-    await _supabase
-        .from('members')
-        .delete()
-        .eq('id', id)
-        .eq('household_id', householdId!);
+    if (householdId == null) return;
 
     members.removeWhere((member) => member.id == id);
 
     if (currentMemberId == id) {
       currentMemberId = null;
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('currentMemberId');
+      await _prefs?.remove('currentMemberId');
     }
 
     for (final task in tasks) {
@@ -677,42 +1224,26 @@ class WGData {
       }
     }
 
-    chatMessages.removeWhere((message) => message['senderId'] == id);
+    _notifyAndCache();
 
-    version.value++;
+    try {
+      await _supabase
+          .from('members')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('member_delete', {'id': id});
+    }
   }
 
   // ============================================================
   // TASKS
   // ============================================================
-
-  static Future<void> _loadTasks() async {
-    if (householdId == null) {
-      return;
-    }
-
-    final response = await _supabase
-        .from('tasks')
-        .select(
-          'id, name, completed, assigned_to, due_date, repeat, sort_order',
-        )
-        .eq('household_id', householdId!)
-        .order('sort_order')
-        .order('created_at');
-
-    tasks.clear();
-
-    for (final row in response) {
-      tasks.add({
-        'id': row['id'],
-        'name': row['name'],
-        'completed': row['completed'] ?? false,
-        'assignedTo': row['assigned_to'],
-        'dueDate': row['due_date'],
-        'repeat': row['repeat'] ?? 'none',
-      });
-    }
-  }
 
   static Future<Map<String, dynamic>?> addTask({
     required String name,
@@ -724,36 +1255,42 @@ class WGData {
       return null;
     }
 
+    final id = _newId();
     final sortOrder = tasks.length;
 
-    final response = await _supabase
-        .from('tasks')
-        .insert({
-          'household_id': householdId,
-          'name': name,
-          'completed': false,
-          'assigned_to': assignedTo,
-          'due_date': dueDate,
-          'repeat': repeat,
-          'sort_order': sortOrder,
-        })
-        .select(
-          'id, name, completed, assigned_to, due_date, repeat, sort_order',
-        )
-        .single();
-
     final task = {
-      'id': response['id'],
-      'name': response['name'],
-      'completed': response['completed'] ?? false,
-      'assignedTo': response['assigned_to'],
-      'dueDate': response['due_date'],
-      'repeat': response['repeat'] ?? 'none',
+      'id': id,
+      'name': name,
+      'completed': false,
+      'assignedTo': assignedTo,
+      'dueDate': dueDate,
+      'repeat': repeat,
+      'sortOrder': sortOrder,
     };
 
     tasks.add(task);
 
-    version.value++;
+    _notifyAndCache();
+
+    final data = {
+      'id': id,
+      'household_id': householdId,
+      'name': name,
+      'completed': false,
+      'assigned_to': assignedTo,
+      'due_date': dueDate,
+      'repeat': repeat,
+      'sort_order': sortOrder,
+    };
+
+    try {
+      await _supabase.from('tasks').insert(data);
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('task_insert', data);
+    }
 
     return task;
   }
@@ -768,9 +1305,7 @@ class WGData {
     bool updateDueDate = false,
     String? repeat,
   }) async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
     final updates = <String, dynamic>{};
 
@@ -798,13 +1333,7 @@ class WGData {
       return;
     }
 
-    await _supabase
-        .from('tasks')
-        .update(updates)
-        .eq('id', id)
-        .eq('household_id', householdId!);
-
-    final index = tasks.indexWhere((task) => task['id'] == id);
+    final index = tasks.indexWhere((task) => task['id']?.toString() == id);
 
     if (index != -1) {
       if (name != null) {
@@ -828,50 +1357,44 @@ class WGData {
       }
     }
 
-    version.value++;
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('tasks')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('task_update', {'id': id, 'updates': updates});
+    }
   }
 
   static Future<void> deleteTask(String id) async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
-    await _supabase
-        .from('tasks')
-        .delete()
-        .eq('id', id)
-        .eq('household_id', householdId!);
-
-    tasks.removeWhere((task) => task['id'] == id);
+    tasks.removeWhere((task) => task['id']?.toString() == id);
 
     await _saveTaskOrder();
 
-    version.value++;
-  }
+    _notifyAndCache();
 
-  static Future<void> updateTaskOrder() async {
-    if (householdId == null) {
-      return;
-    }
-
-    await _saveTaskOrder();
-
-    version.value++;
-  }
-
-  static Future<void> _saveTaskOrder() async {
-    if (householdId == null) {
-      return;
-    }
-
-    for (var index = 0; index < tasks.length; index++) {
-      final taskId = tasks[index]['id'];
-
+    try {
       await _supabase
           .from('tasks')
-          .update({'sort_order': index})
-          .eq('id', taskId)
+          .delete()
+          .eq('id', id)
           .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('task_delete', {'id': id});
     }
   }
 
@@ -879,59 +1402,41 @@ class WGData {
   // SHOPPING
   // ============================================================
 
-  static Future<void> _loadShoppingItems() async {
-    if (householdId == null) {
-      return;
-    }
-
-    final response = await _supabase
-        .from('shopping_items')
-        .select('id, name, completed, quantity, claimed_by, created_at')
-        .eq('household_id', householdId!)
-        .order('created_at');
-
-    shoppingItems.clear();
-
-    for (final row in response) {
-      shoppingItems.add({
-        'id': row['id'],
-        'name': row['name'],
-        'completed': row['completed'] ?? false,
-        'quantity': row['quantity'] ?? 1,
-        'claimedBy': row['claimed_by'],
-      });
-    }
-  }
-
   static Future<void> addShoppingItem({
     required String name,
     int quantity = 1,
   }) async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
-    final response = await _supabase
-        .from('shopping_items')
-        .insert({
-          'household_id': householdId,
-          'name': name,
-          'completed': false,
-          'quantity': quantity,
-          'claimed_by': null,
-        })
-        .select('id, name, completed, quantity, claimed_by, created_at')
-        .single();
+    final id = _newId();
 
     shoppingItems.add({
-      'id': response['id'],
-      'name': response['name'],
-      'completed': response['completed'] ?? false,
-      'quantity': response['quantity'] ?? 1,
-      'claimedBy': response['claimed_by'],
+      'id': id,
+      'name': name,
+      'completed': false,
+      'quantity': quantity,
+      'claimedBy': null,
     });
 
-    version.value++;
+    _notifyAndCache();
+
+    final data = {
+      'id': id,
+      'household_id': householdId,
+      'name': name,
+      'completed': false,
+      'quantity': quantity,
+      'claimed_by': null,
+    };
+
+    try {
+      await _supabase.from('shopping_items').insert(data);
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('shopping_insert', data);
+    }
   }
 
   static Future<void> updateShoppingItem({
@@ -941,9 +1446,7 @@ class WGData {
     String? claimedBy,
     bool clearClaimedBy = false,
   }) async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
     final updates = <String, dynamic>{};
 
@@ -965,13 +1468,9 @@ class WGData {
       return;
     }
 
-    await _supabase
-        .from('shopping_items')
-        .update(updates)
-        .eq('id', id)
-        .eq('household_id', householdId!);
-
-    final index = shoppingItems.indexWhere((item) => item['id'] == id);
+    final index = shoppingItems.indexWhere(
+      (item) => item['id']?.toString() == id,
+    );
 
     if (index != -1) {
       if (completed != null) {
@@ -989,53 +1488,48 @@ class WGData {
       }
     }
 
-    version.value++;
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('shopping_items')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('shopping_update', {'id': id, 'updates': updates});
+    }
   }
 
   static Future<void> deleteShoppingItem(String id) async {
-    if (householdId == null) {
-      return;
+    if (householdId == null) return;
+
+    shoppingItems.removeWhere((item) => item['id']?.toString() == id);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('shopping_items')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('shopping_delete', {'id': id});
     }
-
-    await _supabase
-        .from('shopping_items')
-        .delete()
-        .eq('id', id)
-        .eq('household_id', householdId!);
-
-    shoppingItems.removeWhere((item) => item['id'] == id);
-
-    version.value++;
   }
 
   // ============================================================
   // CHAT
   // ============================================================
-
-  static Future<void> _loadChatMessages() async {
-    if (householdId == null) {
-      return;
-    }
-
-    final response = await _supabase
-        .from('chat_messages')
-        .select('id, text, sender_id, timestamp, edited, reply_to')
-        .eq('household_id', householdId!)
-        .order('timestamp');
-
-    chatMessages.clear();
-
-    for (final row in response) {
-      chatMessages.add({
-        'id': row['id'],
-        'text': row['text'],
-        'senderId': row['sender_id'],
-        'timestamp': row['timestamp'],
-        'edited': row['edited'] ?? false,
-        'replyTo': row['reply_to'],
-      });
-    }
-  }
 
   static Future<Map<String, dynamic>?> addChatMessage({
     required String text,
@@ -1046,31 +1540,46 @@ class WGData {
       return null;
     }
 
-    final response = await _supabase
-        .from('chat_messages')
-        .insert({
-          'household_id': householdId,
-          'text': text,
-          'sender_id': senderId,
-          'timestamp': DateTime.now().toIso8601String(),
-          'edited': false,
-          'reply_to': replyTo,
-        })
-        .select('id, text, sender_id, timestamp, edited, reply_to')
-        .single();
+    final id = _newId();
+    final timestamp = DateTime.now().toIso8601String();
 
     final message = {
-      'id': response['id'],
-      'text': response['text'],
-      'senderId': response['sender_id'],
-      'timestamp': response['timestamp'],
-      'edited': response['edited'] ?? false,
-      'replyTo': response['reply_to'],
+      'id': id,
+      'text': text,
+      'senderId': senderId,
+      'timestamp': timestamp,
+      'edited': false,
+      'replyTo': replyTo,
     };
 
     chatMessages.add(message);
 
-    version.value++;
+    chatMessages.sort((a, b) {
+      return (a['timestamp']?.toString() ?? '').compareTo(
+        b['timestamp']?.toString() ?? '',
+      );
+    });
+
+    _notifyAndCache();
+
+    final data = {
+      'id': id,
+      'household_id': householdId,
+      'text': text,
+      'sender_id': senderId,
+      'timestamp': timestamp,
+      'edited': false,
+      'reply_to': replyTo,
+    };
+
+    try {
+      await _supabase.from('chat_messages').insert(data);
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('chat_insert', data);
+    }
 
     return message;
   }
@@ -1079,58 +1588,68 @@ class WGData {
     required String id,
     required String text,
   }) async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
-    await _supabase
-        .from('chat_messages')
-        .update({'text': text, 'edited': true})
-        .eq('id', id)
-        .eq('household_id', householdId!);
-
-    final index = chatMessages.indexWhere((message) => message['id'] == id);
+    final index = chatMessages.indexWhere(
+      (message) => message['id']?.toString() == id,
+    );
 
     if (index != -1) {
       chatMessages[index]['text'] = text;
       chatMessages[index]['edited'] = true;
     }
 
-    version.value++;
+    _notifyAndCache();
+
+    final updates = {'text': text, 'edited': true};
+
+    try {
+      await _supabase
+          .from('chat_messages')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('chat_update', {'id': id, 'updates': updates});
+    }
   }
 
   static Future<void> deleteChatMessage(String id) async {
-    if (householdId == null) {
-      return;
-    }
+    if (householdId == null) return;
 
-    // First remove reply references to this message.
-    //
-    // This is important because a message may have other
-    // messages replying to it.
-    await _supabase
-        .from('chat_messages')
-        .update({'reply_to': null})
-        .eq('reply_to', id)
-        .eq('household_id', householdId!);
-
-    // Now delete the original message.
-    await _supabase
-        .from('chat_messages')
-        .delete()
-        .eq('id', id)
-        .eq('household_id', householdId!);
-
-    // Keep our local cache in sync.
-    chatMessages.removeWhere((message) => message['id'] == id);
+    chatMessages.removeWhere((message) => message['id']?.toString() == id);
 
     for (final message in chatMessages) {
-      if (message['replyTo'] == id) {
+      if (message['replyTo']?.toString() == id) {
         message['replyTo'] = null;
       }
     }
 
-    version.value++;
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('chat_messages')
+          .update({'reply_to': null})
+          .eq('reply_to', id)
+          .eq('household_id', householdId!);
+
+      await _supabase
+          .from('chat_messages')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('chat_delete', {'id': id});
+    }
   }
 
   // ============================================================
@@ -1140,19 +1659,17 @@ class WGData {
   static Future<void> setCurrentMember(String? id) async {
     currentMemberId = id;
 
-    final prefs = await SharedPreferences.getInstance();
-
     if (id == null) {
-      await prefs.remove('currentMemberId');
+      await _prefs?.remove('currentMemberId');
     } else {
-      await prefs.setString('currentMemberId', id);
+      await _prefs?.setString('currentMemberId', id);
     }
 
     version.value++;
   }
 
   // ============================================================
-  // EXISTING APP HELPERS
+  // HELPERS
   // ============================================================
 
   static int get currentMemberTaskCount {
@@ -1209,9 +1726,7 @@ class WGData {
     }).toList();
   }
 
-  static int get memberCount {
-    return members.length;
-  }
+  static int get memberCount => members.length;
 
   static Map<String, dynamic>? get latestChatMessage {
     if (chatMessages.isEmpty) {
@@ -1222,20 +1737,16 @@ class WGData {
   }
 
   // ============================================================
-  // SAVE
+  // PUBLIC SAVE
   // ============================================================
-  //
-  // Chat, tasks, shopping and members are now stored in Supabase.
-  // Only the locally selected member still needs SharedPreferences.
-  //
 
   static Future<void> save() async {
-    final prefs = await SharedPreferences.getInstance();
+    await _saveCache();
 
     if (currentMemberId != null) {
-      await prefs.setString('currentMemberId', currentMemberId!);
+      await _prefs?.setString('currentMemberId', currentMemberId!);
     } else {
-      await prefs.remove('currentMemberId');
+      await _prefs?.remove('currentMemberId');
     }
 
     version.value++;

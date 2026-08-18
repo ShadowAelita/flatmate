@@ -46,7 +46,6 @@ class _TaskPageState extends State<TaskPage> {
         final aValue = a['dueDate'];
         final bValue = b['dueDate'];
 
-        // Tasks without a deadline go to the bottom.
         if (aValue == null && bValue == null) {
           return 0;
         }
@@ -59,8 +58,8 @@ class _TaskPageState extends State<TaskPage> {
           return -1;
         }
 
-        final aDate = DateTime.tryParse(aValue as String);
-        final bDate = DateTime.tryParse(bValue as String);
+        final aDate = DateTime.tryParse(aValue.toString());
+        final bDate = DateTime.tryParse(bValue.toString());
 
         if (aDate == null && bDate == null) {
           return 0;
@@ -76,9 +75,13 @@ class _TaskPageState extends State<TaskPage> {
 
         return aDate.compareTo(bDate);
       });
+
+      for (var index = 0; index < WGData.tasks.length; index++) {
+        WGData.tasks[index]['sortOrder'] = index;
+      }
     });
 
-    await WGData.save();
+    await WGData.updateTaskOrder();
   }
 
   String _formatDueDate(dynamic value) {

@@ -186,7 +186,21 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    await WGData.updateChatMessage(id: messageId, text: editedText);
+    try {
+      await WGData.updateChatMessage(id: messageId, text: editedText);
+    } catch (error) {
+      debugPrint('Could not edit message: $error');
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nachricht konnte nicht bearbeitet werden.'),
+        ),
+      );
+    }
   }
 
   Future<void> _deleteMessage(Map<String, dynamic> message) async {
