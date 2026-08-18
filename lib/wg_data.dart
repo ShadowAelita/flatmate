@@ -1,10 +1,9 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
-
 import 'package:flutter/foundation.dart';
-
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class WGMember {
   final String id;
@@ -24,7 +23,11 @@ class WGData {
   static final List<Map<String, dynamic>> tasks = [];
   static final List<Map<String, dynamic>> chatMessages = [];
 
+  static String? householdId;
+
   static final ValueNotifier<int> version = ValueNotifier<int>(0);
+
+  static final SupabaseClient _supabase = Supabase.instance.client;
 
   static const List<Color> memberColors = [
     Colors.red,
@@ -35,11 +38,11 @@ class WGData {
     Colors.purple,
   ];
 
+  static String? currentMemberId;
+
   static Color memberColor(WGMember member) {
     return memberColors[member.colorIndex % memberColors.length];
   }
-
-  static String? currentMemberId;
 
   static WGMember? get currentMember {
     if (currentMemberId == null) {
@@ -54,6 +57,200 @@ class WGData {
 
     return null;
   }
+
+  // ============================================================
+  // HOUSEHOLD
+  // ============================================================
+
+  static Future<void> _initializeHousehold() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final savedHouseholdId = prefs.getString('householdId');
+
+    if (savedHouseholdId != null) {
+      householdId = savedHouseholdId;
+      return;
+    }
+
+    final response = await _supabase
+        .from('households')
+        .insert({'name': 'Unsere WG'})
+        .select()
+        .single();
+
+    householdId = response['id'] as String;
+
+    await prefs.setString('householdId', householdId!);
+  }
+
+  // ============================================================
+  // INITIALIZATION
+  // ============================================================
+
+  static Future<void> initialize() async {
+    await _initializeHousehold();
+
+    final prefs = await SharedPreferences.getInstance();
+
+    final savedCurrentMemberId = prefs.getString('currentMemberId');
+
+    members.clear();
+    shoppingItems.clear();
+    tasks.clear();
+    chatMessages.clear();
+
+    currentMemberId = savedCurrentMemberId;
+
+    await _loadMembers();
+
+    version.value++;
+  }
+
+  // ============================================================
+  // MEMBERS
+  // ============================================================
+
+  static Future<void> _loadMembers() async {
+    if (householdId == null) {
+      return;
+    }
+
+    final response = await _supabase
+        .from('members')
+        .select('id, name, color_index')
+        .eq('household_id', householdId!)
+        .order('created_at');
+
+    members.clear();
+
+    for (final row in response) {
+      members.add(
+        WGMember(
+          id: row['id'] as String,
+          name: row['name'] as String,
+          colorIndex: row['color_index'] as int? ?? 0,
+        ),
+      );
+    }
+
+    // If the locally selected member no longer exists,
+    // clear the selection.
+    if (currentMemberId != null &&
+        !members.any((member) => member.id == currentMemberId)) {
+      currentMemberId = null;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('currentMemberId');
+    }
+  }
+
+  static Future<WGMember?> addMember({
+    required String name,
+    required int colorIndex,
+  }) async {
+    if (householdId == null) {
+      return null;
+    }
+
+    final response = await _supabase
+        .from('members')
+        .insert({
+          'household_id': householdId,
+          'name': name,
+          'color_index': colorIndex,
+        })
+        .select('id, name, color_index')
+        .single();
+
+    final member = WGMember(
+      id: response['id'] as String,
+      name: response['name'] as String,
+      colorIndex: response['color_index'] as int? ?? 0,
+    );
+
+    members.add(member);
+
+    version.value++;
+
+    return member;
+  }
+
+  static Future<void> updateMember({
+    required String id,
+    required String name,
+    required int colorIndex,
+  }) async {
+    await _supabase
+        .from('members')
+        .update({'name': name, 'color_index': colorIndex})
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    final index = members.indexWhere((member) => member.id == id);
+
+    if (index != -1) {
+      members[index] = WGMember(id: id, name: name, colorIndex: colorIndex);
+    }
+
+    version.value++;
+  }
+
+  static Future<void> deleteMember(String id) async {
+    await _supabase
+        .from('members')
+        .delete()
+        .eq('id', id)
+        .eq('household_id', householdId!);
+
+    members.removeWhere((member) => member.id == id);
+
+    if (currentMemberId == id) {
+      currentMemberId = null;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('currentMemberId');
+    }
+
+    // These local references will eventually also be moved
+    // to Supabase when we migrate tasks/shopping/chat.
+    for (final task in tasks) {
+      if (task['assignedTo'] == id) {
+        task['assignedTo'] = null;
+      }
+    }
+
+    for (final item in shoppingItems) {
+      if (item['claimedBy'] == id) {
+        item['claimedBy'] = null;
+      }
+    }
+
+    chatMessages.removeWhere((message) => message['senderId'] == id);
+
+    version.value++;
+  }
+
+  // ============================================================
+  // CURRENT MEMBER
+  // ============================================================
+
+  static Future<void> setCurrentMember(String? id) async {
+    currentMemberId = id;
+
+    final prefs = await SharedPreferences.getInstance();
+
+    if (id == null) {
+      await prefs.remove('currentMemberId');
+    } else {
+      await prefs.setString('currentMemberId', id);
+    }
+
+    version.value++;
+  }
+
+  // ============================================================
+  // EXISTING APP HELPERS
+  // ============================================================
 
   static int get currentMemberTaskCount {
     final member = currentMember;
@@ -121,93 +318,18 @@ class WGData {
     return chatMessages.last;
   }
 
-  static Future<void> initialize() async {
-    final prefs = await SharedPreferences.getInstance();
-    bool tasksChanged = false;
-
-    final savedMembers = prefs.getString('members');
-    final savedShoppingItems = prefs.getString('shoppingItems');
-    final savedTasks = prefs.getString('tasks');
-    final savedChatMessages = prefs.getString('chatMessages');
-    final savedCurrentMemberId = prefs.getString('currentMemberId');
-
-    members.clear();
-    shoppingItems.clear();
-    tasks.clear();
-    chatMessages.clear();
-
-    if (savedMembers != null) {
-      final decodedMembers = jsonDecode(savedMembers) as List;
-
-      members.addAll(
-        decodedMembers.map((member) {
-          final data = member as Map<String, dynamic>;
-
-          return WGMember(
-            id: data['id'] as String,
-            name: data['name'] as String,
-            colorIndex: data['colorIndex'] as int? ?? 0,
-          );
-        }),
-      );
-    }
-
-    if (savedShoppingItems != null) {
-      final decodedShoppingItems = jsonDecode(savedShoppingItems) as List;
-
-      shoppingItems.addAll(
-        decodedShoppingItems.map((item) {
-          return Map<String, dynamic>.from(item as Map);
-        }),
-      );
-    }
-
-    if (savedTasks != null) {
-      final decodedTasks = jsonDecode(savedTasks) as List;
-
-      tasks.addAll(
-        decodedTasks.map((task) {
-          final data = Map<String, dynamic>.from(task as Map);
-
-          if (data['id'] == null) {
-            data['id'] = DateTime.now().microsecondsSinceEpoch.toString();
-            tasksChanged = true;
-          }
-
-          return data;
-        }),
-      );
-    }
-
-    if (savedChatMessages != null) {
-      final decodedChatMessages = jsonDecode(savedChatMessages) as List;
-
-      chatMessages.addAll(
-        decodedChatMessages.map((message) {
-          return Map<String, dynamic>.from(message as Map);
-        }),
-      );
-    }
-
-    currentMemberId = savedCurrentMemberId;
-
-    if (tasksChanged) {
-      await save();
-    }
-  }
+  // ============================================================
+  // LEGACY LOCAL SAVE
+  // ============================================================
+  //
+  // We keep this temporarily for tasks/shopping/chat because
+  // those are not migrated to Supabase yet.
+  //
+  // Members are NO LONGER saved here.
+  //
 
   static Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
-
-    final membersJson = members.map((member) {
-      return {
-        'id': member.id,
-        'name': member.name,
-        'colorIndex': member.colorIndex,
-      };
-    }).toList();
-
-    await prefs.setString('members', jsonEncode(membersJson));
 
     await prefs.setString('shoppingItems', jsonEncode(shoppingItems));
 

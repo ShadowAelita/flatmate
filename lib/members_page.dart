@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'wg_data.dart';
 
@@ -50,11 +51,11 @@ class _MembersPageState extends State<MembersPage> {
                         ? const Icon(Icons.check)
                         : null,
                     onTap: () async {
-                      setState(() {
-                        WGData.currentMemberId = member.id;
-                      });
+                      await WGData.setCurrentMember(member.id);
 
-                      await WGData.save();
+                      if (mounted) {
+                        setState(() {});
+                      }
 
                       if (context.mounted) {
                         Navigator.pop(context);
@@ -77,7 +78,9 @@ class _MembersPageState extends State<MembersPage> {
       return;
     }
 
-    if (WGData.members.any((member) => member.name == name)) {
+    if (WGData.members.any(
+      (member) => member.name.toLowerCase() == name.toLowerCase(),
+    )) {
       return;
     }
 
@@ -89,7 +92,7 @@ class _MembersPageState extends State<MembersPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Wähle deine Farbe'),
+              title: const Text('Choose your color'),
               content: Wrap(
                 spacing: 12,
                 runSpacing: 12,
@@ -118,13 +121,13 @@ class _MembersPageState extends State<MembersPage> {
                   onPressed: () {
                     Navigator.pop(context);
                   },
-                  child: const Text('Abbrechen'),
+                  child: const Text('Cancel'),
                 ),
                 FilledButton(
                   onPressed: () {
                     Navigator.pop(context, selectedColorIndex);
                   },
-                  child: const Text('Hinzufügen'),
+                  child: const Text('Add'),
                 ),
               ],
             );
@@ -137,19 +140,29 @@ class _MembersPageState extends State<MembersPage> {
       return;
     }
 
-    setState(() {
-      WGData.members.add(
-        WGMember(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          name: name,
-          colorIndex: chosenColorIndex,
-        ),
-      );
-    });
+    try {
+      await WGData.addMember(name: name, colorIndex: chosenColorIndex);
 
-    _controller.clear();
+      _controller.clear();
 
-    await WGData.save();
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e, stackTrace) {
+      debugPrint('========== ADD MEMBER FAILED ==========');
+      debugPrint('Error: $e');
+      debugPrint('Stack trace: $stackTrace');
+      debugPrint('=======================================');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Fehler: $e'),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _showEditMemberDialog(WGMember member) async {
@@ -182,51 +195,77 @@ class _MembersPageState extends State<MembersPage> {
       return;
     }
 
-    setState(() {
-      final index = WGData.members.indexWhere(
-        (existingMember) => existingMember.id == member.id,
+    try {
+      await WGData.updateMember(
+        id: member.id,
+        name: newName,
+        colorIndex: newColorIndex,
       );
 
-      if (index != -1) {
-        WGData.members[index] = WGMember(
-          id: member.id,
-          name: newName,
-          colorIndex: newColorIndex,
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Failed to update member: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update member.')),
         );
       }
-    });
+    }
 
     await WGData.save();
   }
 
   Future<void> _deleteMember(WGMember member) async {
-    setState(() {
-      WGData.members.removeWhere(
-        (existingMember) => existingMember.id == member.id,
-      );
+    try {
+      // Delete the member from Supabase first.
+      await Supabase.instance.client
+          .from('members')
+          .delete()
+          .eq('id', member.id);
 
-      if (WGData.currentMemberId == member.id) {
-        WGData.currentMemberId = null;
-      }
+      // Update local state after Supabase succeeds.
+      setState(() {
+        WGData.members.removeWhere(
+          (existingMember) => existingMember.id == member.id,
+        );
 
-      for (final task in WGData.tasks) {
-        if (task['assignedTo'] == member.id) {
-          task['assignedTo'] = null;
+        if (WGData.currentMemberId == member.id) {
+          WGData.currentMemberId = null;
         }
-      }
 
-      for (final item in WGData.shoppingItems) {
-        if (item['claimedBy'] == member.id) {
-          item['claimedBy'] = null;
+        for (final task in WGData.tasks) {
+          if (task['assignedTo'] == member.id) {
+            task['assignedTo'] = null;
+          }
         }
+
+        for (final item in WGData.shoppingItems) {
+          if (item['claimedBy'] == member.id) {
+            item['claimedBy'] = null;
+          }
+        }
+
+        WGData.chatMessages.removeWhere(
+          (message) => message['senderId'] == member.id,
+        );
+      });
+
+      // Keep local storage in sync too.
+      await WGData.save();
+    } catch (e) {
+      debugPrint('Could not delete member: $e');
+
+      if (!mounted) {
+        return;
       }
 
-      WGData.chatMessages.removeWhere(
-        (message) => message['senderId'] == member.id,
-      );
-    });
-
-    await WGData.save();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not delete member')));
+    }
   }
 
   @override
@@ -261,7 +300,7 @@ class _MembersPageState extends State<MembersPage> {
               textInputAction: TextInputAction.done,
               decoration: const InputDecoration(
                 labelText: 'Name',
-                hintText: 'z. B. Louis',
+                hintText: 'z. B. Knut',
                 prefixIcon: Icon(Icons.person_outline),
               ),
               onSubmitted: (_) => _addMember(),

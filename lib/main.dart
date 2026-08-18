@@ -12,6 +12,13 @@ Future<void> main() async {
     anonKey: 'sb_publishable_u6ytLk4KbPdOulUADY3Fag_qUPfpYYf',
   );
 
+  try {
+    await WGData.initialize();
+  } catch (e, stackTrace) {
+    debugPrint('WGData initialization failed: $e');
+    debugPrintStack(stackTrace: stackTrace);
+  }
+
   runApp(const MyApp());
 }
 
