@@ -25,6 +25,11 @@ class WGData {
   static final ValueNotifier<int> version = ValueNotifier<int>(0);
 
   static final SupabaseClient _supabase = Supabase.instance.client;
+  static RealtimeChannel? _householdChannel;
+  static RealtimeChannel? _membersChannel;
+  static RealtimeChannel? _tasksChannel;
+  static RealtimeChannel? _shoppingChannel;
+  static RealtimeChannel? _chatChannel;
 
   static const List<Color> memberColors = [
     Colors.red,
@@ -80,6 +85,27 @@ class WGData {
     await prefs.setString('householdId', householdId!);
   }
 
+  static Future<void> _unsubscribeFromRealtime() async {
+    final channels = [
+      _householdChannel,
+      _membersChannel,
+      _tasksChannel,
+      _shoppingChannel,
+      _chatChannel,
+    ];
+
+    for (final channel in channels) {
+      if (channel != null) {
+        await _supabase.removeChannel(channel);
+      }
+    }
+
+    _householdChannel = null;
+    _membersChannel = null;
+    _tasksChannel = null;
+    _shoppingChannel = null;
+    _chatChannel = null;
+  }
   // ============================================================
   // INITIALIZATION
   // ============================================================
@@ -103,9 +129,431 @@ class WGData {
     await _loadShoppingItems();
     await _loadChatMessages();
 
+    await _unsubscribeFromRealtime();
+    await _subscribeToRealtime();
+
     version.value++;
   }
 
+  static void _handleMembersRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final householdFromNew = newRecord['household_id']?.toString();
+    final householdFromOld = oldRecord['household_id']?.toString();
+
+    if (householdFromNew != currentHouseholdId &&
+        householdFromOld != currentHouseholdId) {
+      return;
+    }
+
+    final memberId = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (memberId == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        final alreadyExists = members.any((member) => member.id == memberId);
+
+        if (alreadyExists) {
+          return;
+        }
+
+        members.add(
+          WGMember(
+            id: memberId,
+            name: newRecord['name']?.toString() ?? '',
+            colorIndex: newRecord['color_index'] as int? ?? 0,
+          ),
+        );
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = members.indexWhere((member) => member.id == memberId);
+
+        if (index == -1) {
+          members.add(
+            WGMember(
+              id: memberId,
+              name: newRecord['name']?.toString() ?? '',
+              colorIndex: newRecord['color_index'] as int? ?? 0,
+            ),
+          );
+        } else {
+          members[index] = WGMember(
+            id: memberId,
+            name: newRecord['name']?.toString() ?? '',
+            colorIndex: newRecord['color_index'] as int? ?? 0,
+          );
+        }
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.delete:
+        members.removeWhere((member) => member.id == memberId);
+
+        if (currentMemberId == memberId) {
+          currentMemberId = null;
+        }
+
+        version.value++;
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  static void _handleHouseholdRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final householdIdFromNew = newRecord['id']?.toString();
+    final householdIdFromOld = oldRecord['id']?.toString();
+
+    if (householdIdFromNew != currentHouseholdId &&
+        householdIdFromOld != currentHouseholdId) {
+      return;
+    }
+
+    version.value++;
+  }
+
+  static void _handleTasksRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final householdFromNew = newRecord['household_id']?.toString();
+    final householdFromOld = oldRecord['household_id']?.toString();
+
+    if (householdFromNew != currentHouseholdId &&
+        householdFromOld != currentHouseholdId) {
+      return;
+    }
+
+    final taskId = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (taskId == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        final alreadyExists = tasks.any(
+          (task) => task['id']?.toString() == taskId,
+        );
+
+        if (alreadyExists) {
+          return;
+        }
+
+        tasks.add({
+          'id': taskId,
+          'name': newRecord['name'],
+          'completed': newRecord['completed'] ?? false,
+          'assignedTo': newRecord['assigned_to'],
+          'dueDate': newRecord['due_date'],
+          'repeat': newRecord['repeat'] ?? 'none',
+        });
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = tasks.indexWhere(
+          (task) => task['id']?.toString() == taskId,
+        );
+
+        final updatedTask = {
+          'id': taskId,
+          'name': newRecord['name'],
+          'completed': newRecord['completed'] ?? false,
+          'assignedTo': newRecord['assigned_to'],
+          'dueDate': newRecord['due_date'],
+          'repeat': newRecord['repeat'] ?? 'none',
+        };
+
+        if (index == -1) {
+          tasks.add(updatedTask);
+        } else {
+          tasks[index] = updatedTask;
+        }
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.delete:
+        tasks.removeWhere((task) => task['id']?.toString() == taskId);
+
+        version.value++;
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  static void _handleShoppingRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final householdFromNew = newRecord['household_id']?.toString();
+    final householdFromOld = oldRecord['household_id']?.toString();
+
+    if (householdFromNew != currentHouseholdId &&
+        householdFromOld != currentHouseholdId) {
+      return;
+    }
+
+    final itemId = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (itemId == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        final alreadyExists = shoppingItems.any(
+          (item) => item['id']?.toString() == itemId,
+        );
+
+        if (alreadyExists) {
+          return;
+        }
+
+        shoppingItems.add({
+          'id': itemId,
+          'name': newRecord['name'],
+          'completed': newRecord['completed'] ?? false,
+          'quantity': newRecord['quantity'] ?? 1,
+          'claimedBy': newRecord['claimed_by'],
+        });
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = shoppingItems.indexWhere(
+          (item) => item['id']?.toString() == itemId,
+        );
+
+        final updatedItem = {
+          'id': itemId,
+          'name': newRecord['name'],
+          'completed': newRecord['completed'] ?? false,
+          'quantity': newRecord['quantity'] ?? 1,
+          'claimedBy': newRecord['claimed_by'],
+        };
+
+        if (index == -1) {
+          shoppingItems.add(updatedItem);
+        } else {
+          shoppingItems[index] = updatedItem;
+        }
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.delete:
+        shoppingItems.removeWhere((item) => item['id']?.toString() == itemId);
+
+        version.value++;
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  static void _handleChatRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final householdFromNew = newRecord['household_id']?.toString();
+    final householdFromOld = oldRecord['household_id']?.toString();
+
+    if (householdFromNew != currentHouseholdId &&
+        householdFromOld != currentHouseholdId) {
+      return;
+    }
+
+    final messageId = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (messageId == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        final alreadyExists = chatMessages.any(
+          (message) => message['id']?.toString() == messageId,
+        );
+
+        if (alreadyExists) {
+          return;
+        }
+
+        chatMessages.add({
+          'id': messageId,
+          'text': newRecord['text'],
+          'senderId': newRecord['sender_id'],
+          'timestamp': newRecord['timestamp'],
+          'edited': newRecord['edited'] ?? false,
+          'replyTo': newRecord['reply_to'],
+        });
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = chatMessages.indexWhere(
+          (message) => message['id']?.toString() == messageId,
+        );
+
+        final updatedMessage = {
+          'id': messageId,
+          'text': newRecord['text'],
+          'senderId': newRecord['sender_id'],
+          'timestamp': newRecord['timestamp'],
+          'edited': newRecord['edited'] ?? false,
+          'replyTo': newRecord['reply_to'],
+        };
+
+        if (index == -1) {
+          chatMessages.add(updatedMessage);
+        } else {
+          chatMessages[index] = updatedMessage;
+        }
+
+        version.value++;
+        break;
+
+      case PostgresChangeEvent.delete:
+        chatMessages.removeWhere(
+          (message) => message['id']?.toString() == messageId,
+        );
+
+        for (final message in chatMessages) {
+          if (message['replyTo']?.toString() == messageId) {
+            message['replyTo'] = null;
+          }
+        }
+
+        version.value++;
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  static Future<void> _subscribeToRealtime() async {
+    if (householdId == null) {
+      return;
+    }
+
+    final currentHouseholdId = householdId!;
+
+    // ============================================================
+    // HOUSEHOLDS
+    // ============================================================
+
+    _householdChannel = _supabase
+        .channel('household-$currentHouseholdId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'households',
+          callback: (payload) {
+            _handleHouseholdRealtime(payload, currentHouseholdId);
+          },
+        )
+        .subscribe();
+
+    // ============================================================
+    // MEMBERS
+    // ============================================================
+
+    _membersChannel = _supabase
+        .channel('members-$currentHouseholdId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'members',
+          callback: (payload) {
+            _handleMembersRealtime(payload, currentHouseholdId);
+          },
+        )
+        .subscribe();
+
+    // ============================================================
+    // TASKS
+    // ============================================================
+
+    _tasksChannel = _supabase
+        .channel('tasks-$currentHouseholdId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'tasks',
+          callback: (payload) {
+            _handleTasksRealtime(payload, currentHouseholdId);
+          },
+        )
+        .subscribe();
+
+    // ============================================================
+    // SHOPPING
+    // ============================================================
+
+    _shoppingChannel = _supabase
+        .channel('shopping-$currentHouseholdId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'shopping_items',
+          callback: (payload) {
+            _handleShoppingRealtime(payload, currentHouseholdId);
+          },
+        )
+        .subscribe();
+
+    // ============================================================
+    // CHAT
+    // ============================================================
+
+    _chatChannel = _supabase
+        .channel('chat-$currentHouseholdId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'chat_messages',
+          callback: (payload) {
+            _handleChatRealtime(payload, currentHouseholdId);
+          },
+        )
+        .subscribe();
+  }
   // ============================================================
   // MEMBERS
   // ============================================================

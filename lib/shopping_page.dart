@@ -204,7 +204,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
                 } catch (e) {
                   debugPrint('Could not update shopping item: $e');
 
-                  if (mounted) {
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(

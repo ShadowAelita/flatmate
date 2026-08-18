@@ -531,11 +531,7 @@ class _TaskPageState extends State<TaskPage> {
                   : ReorderableListView.builder(
                       itemCount: WGData.tasks.length,
 
-                      onReorder: (oldIndex, newIndex) async {
-                        if (oldIndex < newIndex) {
-                          newIndex -= 1;
-                        }
-
+                      onReorderItem: (oldIndex, newIndex) async {
                         final task = WGData.tasks.removeAt(oldIndex);
 
                         WGData.tasks.insert(newIndex, task);
@@ -706,17 +702,18 @@ class _TaskPageState extends State<TaskPage> {
                                                     'Could not remove task due date: $e',
                                                   );
 
-                                                  if (mounted) {
-                                                    ScaffoldMessenger.of(
-                                                      context,
-                                                    ).showSnackBar(
-                                                      const SnackBar(
-                                                        content: Text(
-                                                          'Frist konnte nicht entfernt werden',
-                                                        ),
-                                                      ),
-                                                    );
+                                                  if (!context.mounted) {
+                                                    return;
                                                   }
+
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            'Frist konnte nicht entfernt werden',
+                                                          ),
+                                                        ),
+                                                      );
                                                 }
                                               },
                                               icon: const Icon(Icons.close),
@@ -792,6 +789,10 @@ class _TaskPageState extends State<TaskPage> {
 
                                 IconButton(
                                   onPressed: () async {
+                                    final messenger = ScaffoldMessenger.of(
+                                      context,
+                                    );
+
                                     try {
                                       await WGData.deleteTask(task['id']);
 
@@ -802,14 +803,13 @@ class _TaskPageState extends State<TaskPage> {
                                       debugPrint('Could not delete task: $e');
 
                                       if (mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                  'Aufgabe konnte nicht gelöscht werden',
-                                                ),
-                                              ),
-                                            );
+                                        messenger.showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Aufgabe konnte nicht gelöscht werden',
+                                            ),
+                                          ),
+                                        );
                                       }
                                     }
                                   },

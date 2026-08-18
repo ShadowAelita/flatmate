@@ -522,7 +522,7 @@ class _EditMemberResult {
   final int? colorIndex;
   final bool delete;
 
-  const _EditMemberResult({this.name, this.colorIndex, this.delete = false});
+  const _EditMemberResult({this.name, this.colorIndex}) : delete = false;
 
   const _EditMemberResult.delete()
     : name = null,
