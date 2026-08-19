@@ -5,6 +5,7 @@ import 'task_page.dart';
 import 'members_page.dart';
 import 'wg_data.dart';
 import 'chat_page.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -94,14 +95,37 @@ class HomePage extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            currentMember == null
-                                ? 'Guten Abend'
-                                : 'Guten Abend ${currentMember.name}',
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  currentMember == null
+                                      ? 'Guten Abend'
+                                      : 'Guten Abend ${currentMember.name}',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+
+                              const SizedBox(width: 8),
+
+                              IconButton(
+                                tooltip: 'Einstellungen',
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const SettingsPage(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.settings_outlined),
+                              ),
+                            ],
                           ),
 
                           const SizedBox(height: 4),
