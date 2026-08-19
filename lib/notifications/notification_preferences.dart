@@ -2,20 +2,15 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationPreferences extends ChangeNotifier {
-  static const String _taskAssignmentsKey =
-      'notifications_task_assignments';
+  static const String _taskAssignmentsKey = 'notifications_task_assignments';
 
-  static const String _taskDueTodayKey =
-      'notifications_task_due_today';
+  static const String _taskDueTodayKey = 'notifications_task_due_today';
 
-  static const String _shoppingKey =
-      'notifications_shopping';
+  static const String _shoppingKey = 'notifications_shopping';
 
-  static const String _chatKey =
-      'notifications_chat';
+  static const String _chatKey = 'notifications_chat';
 
-  static const String _generalKey =
-      'notifications_general';
+  static const String _generalKey = 'notifications_general';
 
   SharedPreferences? _prefs;
 
@@ -34,71 +29,65 @@ class NotificationPreferences extends ChangeNotifier {
   Future<void> initialize() async {
     _prefs ??= await SharedPreferences.getInstance();
 
-    _taskAssignments =
-        _prefs!.getBool(_taskAssignmentsKey) ?? true;
+    _taskAssignments = _prefs!.getBool(_taskAssignmentsKey) ?? true;
 
-    _taskDueToday =
-        _prefs!.getBool(_taskDueTodayKey) ?? true;
+    _taskDueToday = _prefs!.getBool(_taskDueTodayKey) ?? true;
 
-    _shopping =
-        _prefs!.getBool(_shoppingKey) ?? false;
+    _shopping = _prefs!.getBool(_shoppingKey) ?? false;
 
-    _chat =
-        _prefs!.getBool(_chatKey) ?? true;
+    _chat = _prefs!.getBool(_chatKey) ?? true;
 
-    _general =
-        _prefs!.getBool(_generalKey) ?? true;
+    _general = _prefs!.getBool(_generalKey) ?? true;
 
     notifyListeners();
   }
 
   Future<void> setTaskAssignments(bool value) async {
+    await _ensureInitialized();
+
     _taskAssignments = value;
     notifyListeners();
 
-    await _prefs?.setBool(
-      _taskAssignmentsKey,
-      value,
-    );
+    await _prefs!.setBool(_taskAssignmentsKey, value);
   }
 
   Future<void> setTaskDueToday(bool value) async {
+    await _ensureInitialized();
+
     _taskDueToday = value;
     notifyListeners();
 
-    await _prefs?.setBool(
-      _taskDueTodayKey,
-      value,
-    );
+    await _prefs!.setBool(_taskDueTodayKey, value);
   }
 
   Future<void> setShopping(bool value) async {
+    await _ensureInitialized();
+
     _shopping = value;
     notifyListeners();
 
-    await _prefs?.setBool(
-      _shoppingKey,
-      value,
-    );
+    await _prefs!.setBool(_shoppingKey, value);
   }
 
   Future<void> setChat(bool value) async {
+    await _ensureInitialized();
+
     _chat = value;
     notifyListeners();
 
-    await _prefs?.setBool(
-      _chatKey,
-      value,
-    );
+    await _prefs!.setBool(_chatKey, value);
   }
 
   Future<void> setGeneral(bool value) async {
+    await _ensureInitialized();
+
     _general = value;
     notifyListeners();
 
-    await _prefs?.setBool(
-      _generalKey,
-      value,
-    );
+    await _prefs!.setBool(_generalKey, value);
+  }
+
+  Future<void> _ensureInitialized() async {
+    _prefs ??= await SharedPreferences.getInstance();
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'wg_data.dart';
+import 'notification_settings_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -62,9 +63,16 @@ class SettingsPage extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.notifications_outlined),
                   title: const Text('Benachrichtigungen'),
-                  subtitle: const Text('Kommt später'),
+                  subtitle: const Text('Benachrichtigungseinstellungen'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {},
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationSettingsPage(),
+                      ),
+                    );
+                  },
                 ),
 
                 const Divider(height: 1),

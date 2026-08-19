@@ -1,10 +1,10 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'wg_data.dart';
 import 'home_page.dart';
+import 'notifications/notification_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +21,15 @@ Future<void> main() async {
     debugPrintStack(stackTrace: stackTrace);
   }
 
-  runApp(const MyApp());
+  final notificationPreferences = NotificationPreferences();
+  await notificationPreferences.initialize();
+
+  runApp(
+    ChangeNotifierProvider.value(
+      value: notificationPreferences,
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
