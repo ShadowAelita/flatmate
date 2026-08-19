@@ -23,6 +23,7 @@ class WGData {
   static final List<Map<String, dynamic>> shoppingItems = [];
   static final List<Map<String, dynamic>> tasks = [];
   static final List<Map<String, dynamic>> chatMessages = [];
+  static List<Map<String, dynamic>> _pendingOperations = [];
 
   static String? householdId;
   static String? currentMemberId;
@@ -97,6 +98,37 @@ class WGData {
     return future;
   }
 
+  static void _loadPendingOperations() {
+    if (_prefs == null) {
+      _pendingOperations = [];
+      return;
+    }
+
+    try {
+      final raw = _prefs!.getString(_pendingOperationsKey);
+
+      if (raw == null || raw.isEmpty) {
+        _pendingOperations = [];
+        return;
+      }
+
+      final decoded = jsonDecode(raw);
+
+      if (decoded is! List) {
+        _pendingOperations = [];
+        return;
+      }
+
+      _pendingOperations = decoded
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    } catch (error) {
+      debugPrint('Could not load pending operations: $error');
+      _pendingOperations = [];
+    }
+  }
+
   static Future<void> _initializeInternal() async {
     _prefs ??= await SharedPreferences.getInstance();
 
@@ -116,14 +148,14 @@ class WGData {
     // ------------------------------------------------------------
 
     _loadCache();
+    _loadPendingOperations();
 
     version.value++;
 
     // Existing household:
     // immediately show cached state and synchronize in background.
     if (householdId != null) {
-      await _subscribeToRealtime();
-
+      unawaited(_subscribeToRealtime());
       unawaited(_syncOnline());
       return;
     }
@@ -324,41 +356,22 @@ class WGData {
   // ============================================================
 
   static List<Map<String, dynamic>> _readPendingOperations() {
-    if (_prefs == null) {
-      return [];
-    }
-
-    try {
-      final raw = _prefs!.getString(_pendingOperationsKey);
-
-      if (raw == null || raw.isEmpty) {
-        return [];
-      }
-
-      final decoded = jsonDecode(raw);
-
-      if (decoded is! List) {
-        return [];
-      }
-
-      return decoded
-          .whereType<Map>()
-          .map((entry) => Map<String, dynamic>.from(entry))
-          .toList();
-    } catch (error) {
-      debugPrint('Could not read pending operations: $error');
-      return [];
-    }
+    return _pendingOperations;
   }
 
   static Future<void> _writePendingOperations(
     List<Map<String, dynamic>> operations,
   ) async {
+    _pendingOperations = operations;
+
     if (_prefs == null) {
       return;
     }
 
-    await _prefs!.setString(_pendingOperationsKey, jsonEncode(operations));
+    await _prefs!.setString(
+      _pendingOperationsKey,
+      jsonEncode(_pendingOperations),
+    );
   }
 
   static Future<void> _queueOperation(
@@ -698,6 +711,19 @@ class WGData {
   // ============================================================
   // REALTIME HANDLERS
   // ============================================================
+  static void _sortChatMessages() {
+    chatMessages.sort((a, b) {
+      final aTime = DateTime.tryParse(a['timestamp']?.toString() ?? '');
+
+      final bTime = DateTime.tryParse(b['timestamp']?.toString() ?? '');
+
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return -1;
+      if (bTime == null) return 1;
+
+      return aTime.compareTo(bTime);
+    });
+  }
 
   static bool _belongsToHousehold(
     PostgresChangePayload payload,
@@ -829,6 +855,9 @@ class WGData {
     }
 
     _sortTasksLocally();
+    // addChatMessage()
+
+    _sortChatMessages();
     _notifyAndCache();
   }
 
@@ -1557,7 +1586,9 @@ class WGData {
       'replyTo': replyTo,
     };
 
+    // addChatMessage()
     chatMessages.add(message);
+    _sortChatMessages();
 
     chatMessages.sort((a, b) {
       return (a['timestamp']?.toString() ?? '').compareTo(
