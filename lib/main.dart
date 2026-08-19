@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'wg_data.dart';
 import 'home_page.dart';
 import 'notifications/notification_preferences.dart';
+import 'notifications/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,11 @@ Future<void> main() async {
 
   final notificationPreferences = NotificationPreferences();
   await notificationPreferences.initialize();
+
+  await NotificationService.instance.syncTaskNotifications(
+    WGData.tasks,
+    notificationPreferences,
+  );
 
   runApp(
     ChangeNotifierProvider.value(

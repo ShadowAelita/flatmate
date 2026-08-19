@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'notifications/notification_preferences.dart';
+import 'notifications/notification_service.dart';
 import 'wg_data.dart';
 
 class TaskPage extends StatefulWidget {
@@ -11,6 +13,13 @@ class TaskPage extends StatefulWidget {
 
 class _TaskPageState extends State<TaskPage> {
   final TextEditingController _controller = TextEditingController();
+  final NotificationPreferences _notificationPreferences =
+      NotificationPreferences();
+  @override
+  void initState() {
+    super.initState();
+    _notificationPreferences.initialize();
+  }
 
   Future<void> _addTask() async {
     final task = _controller.text.trim();
@@ -20,7 +29,11 @@ class _TaskPageState extends State<TaskPage> {
     }
 
     try {
-      await WGData.addTask(name: task);
+      final addedTask = await WGData.addTask(name: task);
+
+      if (addedTask != null) {
+        await _scheduleTaskNotification(addedTask);
+      }
 
       _controller.clear();
 
@@ -38,6 +51,31 @@ class _TaskPageState extends State<TaskPage> {
         );
       }
     }
+  }
+
+  Future<void> _scheduleTaskNotification(Map<String, dynamic> task) async {
+    final taskId = task['id']?.toString();
+    final taskName = task['name']?.toString();
+    final dueDateValue = task['dueDate'];
+
+    if (taskId == null || taskName == null || dueDateValue == null) {
+      return;
+    }
+
+    final dueDate = DateTime.tryParse(dueDateValue.toString());
+
+    if (dueDate == null) {
+      return;
+    }
+
+    await _notificationPreferences.initialize();
+
+    await NotificationService.instance.scheduleTaskDueToday(
+      taskId: taskId,
+      taskName: taskName,
+      dueDate: dueDate,
+      preferences: _notificationPreferences,
+    );
   }
 
   Future<void> _sortTasksByDueDate() async {
@@ -177,10 +215,23 @@ class _TaskPageState extends State<TaskPage> {
     final dueDate = pickedDate.toIso8601String();
 
     try {
+      // Remove any notification scheduled for the old due date.
+      await NotificationService.instance.cancelTaskNotification(
+        task['id'].toString(),
+      );
+
       await WGData.updateTask(
         id: task['id'],
         dueDate: dueDate,
         updateDueDate: true,
+      );
+
+      // Schedule the notification for the new due date.
+      await NotificationService.instance.scheduleTaskDueToday(
+        taskId: task['id'].toString(),
+        taskName: task['name']?.toString() ?? 'Aufgabe',
+        dueDate: pickedDate,
+        preferences: _notificationPreferences,
       );
 
       if (mounted) {
@@ -317,25 +368,37 @@ class _TaskPageState extends State<TaskPage> {
     try {
       await WGData.updateTask(id: task['id'], completed: completed);
 
+      if (completed) {
+        await NotificationService.instance.cancelTaskNotification(
+          task['id'].toString(),
+        );
+      }
+
       if (!completed) {
+        await _scheduleTaskNotification(task);
+
         if (mounted) {
           setState(() {});
         }
+
         return;
       }
-
       final repeat = task['repeat'] ?? 'none';
 
       if (repeat != 'none' && task['dueDate'] != null) {
         final nextDueDate = _getNextRepeatDate(task['dueDate'], repeat);
 
         if (nextDueDate != null) {
-          await WGData.addTask(
+          final newTask = await WGData.addTask(
             name: task['name'],
             assignedTo: task['assignedTo'],
             dueDate: nextDueDate.toIso8601String(),
             repeat: repeat,
           );
+
+          if (newTask != null) {
+            await _scheduleTaskNotification(newTask);
+          }
         }
       }
 
@@ -704,6 +767,11 @@ class _TaskPageState extends State<TaskPage> {
                                                     dueDate: null,
                                                     updateDueDate: true,
                                                   );
+                                                  await NotificationService
+                                                      .instance
+                                                      .cancelTaskNotification(
+                                                        task['id'].toString(),
+                                                      );
 
                                                   if (mounted) {
                                                     setState(() {});

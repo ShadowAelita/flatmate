@@ -131,6 +131,45 @@ class NotificationService {
     );
   }
 
+  Future<void> syncTaskNotifications(
+    List<Map<String, dynamic>> tasks,
+    NotificationPreferences preferences,
+  ) async {
+    if (!_initialized) {
+      await initialize();
+    }
+
+    for (final task in tasks) {
+      final taskId = task['id']?.toString();
+
+      if (taskId == null) {
+        continue;
+      }
+
+      final completed = task['completed'] == true;
+      final dueDateValue = task['dueDate'];
+
+      if (completed || dueDateValue == null) {
+        await cancelTaskNotification(taskId);
+        continue;
+      }
+
+      final dueDate = DateTime.tryParse(dueDateValue.toString());
+
+      if (dueDate == null) {
+        await cancelTaskNotification(taskId);
+        continue;
+      }
+
+      await scheduleTaskDueToday(
+        taskId: taskId,
+        taskName: task['name']?.toString() ?? 'Aufgabe',
+        dueDate: dueDate,
+        preferences: preferences,
+      );
+    }
+  }
+
   Future<void> cancelTaskNotification(String taskId) async {
     await _plugin.cancel(id: _notificationIdForTask(taskId));
   }
