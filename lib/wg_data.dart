@@ -130,41 +130,60 @@ class WGData {
   }
 
   static Future<void> _initializeInternal() async {
+    final stopwatch = Stopwatch()..start();
+
+    debugPrint('WGData startup: begin');
+
     _prefs ??= await SharedPreferences.getInstance();
+
+    debugPrint(
+      'WGData startup: SharedPreferences '
+      '${stopwatch.elapsedMilliseconds}ms',
+    );
 
     final prefs = _prefs!;
 
     householdId = prefs.getString('householdId');
     currentMemberId = prefs.getString('currentMemberId');
 
-    // ------------------------------------------------------------
-    // IMPORTANT:
-    // Load local data FIRST.
-    //
-    // The UI therefore has something to display even when:
-    // - the phone is offline
-    // - Supabase is slow
-    // - Realtime is unavailable
-    // ------------------------------------------------------------
-
     _loadCache();
     _loadPendingOperations();
 
+    debugPrint(
+      'WGData startup: cache loaded '
+      '${stopwatch.elapsedMilliseconds}ms',
+    );
+
     version.value++;
 
-    // Existing household:
-    // immediately show cached state and synchronize in background.
+    // ------------------------------------------------------------
+    // Existing household
+    // ------------------------------------------------------------
+    //
+    // Nothing network-related belongs on the startup critical path.
+    //
     if (householdId != null) {
       unawaited(_subscribeToRealtime());
       unawaited(_syncOnline());
+
+      debugPrint(
+        'WGData startup: initialization finished '
+        '${stopwatch.elapsedMilliseconds}ms',
+      );
+
       return;
     }
 
-    // First installation with no household yet.
+    // ------------------------------------------------------------
+    // First installation
+    // ------------------------------------------------------------
     //
-    // We cannot create a household offline, so this is the only
-    // situation where startup may need to contact Supabase.
+    // There is no cached household yet, so we have no choice but
+    // to create one online.
+    //
     try {
+      debugPrint('WGData startup: creating household');
+
       final response = await _supabase
           .from('households')
           .insert({'name': 'Unsere WG'})
@@ -176,16 +195,23 @@ class WGData {
 
       await prefs.setString('householdId', householdId!);
 
-      await _subscribeToRealtime();
-
+      unawaited(_subscribeToRealtime());
       unawaited(_syncOnline());
+
+      debugPrint(
+        'WGData startup: household created '
+        '${stopwatch.elapsedMilliseconds}ms',
+      );
     } catch (error) {
       debugPrint('Could not create household: $error');
 
-      // The application still starts.
-      // There simply isn't any household data yet.
       _isOnline = false;
       version.value++;
+
+      debugPrint(
+        'WGData startup: finished without household '
+        '${stopwatch.elapsedMilliseconds}ms',
+      );
     }
   }
 

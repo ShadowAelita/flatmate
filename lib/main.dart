@@ -32,7 +32,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.teal,
+          seedColor: const Color.fromARGB(255, 221, 0, 122),
           brightness: Brightness.dark,
         ),
         scaffoldBackgroundColor: const Color(0xFF121212),
