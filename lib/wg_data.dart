@@ -1122,8 +1122,6 @@ class WGData {
   }
 
   static Future<void> updateTaskOrder() async {
-    _sortTasksLocally();
-
     for (var index = 0; index < tasks.length; index++) {
       tasks[index]['sortOrder'] = index;
     }

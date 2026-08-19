@@ -535,6 +535,14 @@ class _TaskPageState extends State<TaskPage> {
                       itemCount: WGData.tasks.length,
 
                       onReorderItem: (oldIndex, newIndex) async {
+                        onReorderItem:
+                        (oldIndex, newIndex) async {
+                          final task = WGData.tasks.removeAt(oldIndex);
+
+                          WGData.tasks.insert(newIndex, task);
+
+                          await WGData.updateTaskOrder();
+                        };
                         final task = WGData.tasks.removeAt(oldIndex);
 
                         WGData.tasks.insert(newIndex, task);
