@@ -132,13 +132,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _editMessage(Map<String, dynamic> message) async {
-    final controller = TextEditingController(
-      text: message['text']?.toString() ?? '',
-    );
-
     final editedText = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
+        final controller = TextEditingController(
+          text: message['text']?.toString() ?? '',
+        );
+
         return AlertDialog(
           title: const Text('Nachricht bearbeiten'),
           content: TextField(
@@ -154,7 +154,9 @@ class _ChatPageState extends State<ChatPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
               child: const Text('Abbrechen'),
             ),
             FilledButton(
@@ -173,8 +175,6 @@ class _ChatPageState extends State<ChatPage> {
         );
       },
     );
-
-    controller.dispose();
 
     if (!mounted || editedText == null || editedText.isEmpty) {
       return;
