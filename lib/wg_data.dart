@@ -38,7 +38,10 @@ class WGData {
   static Future<void>? _initializationFuture;
   static Future<void>? _syncFuture;
 
+  static Timer? _cacheSaveTimer;
+
   static bool _isOnline = false;
+
   static const String _pendingOperationsKey = 'wg_pending_operations';
   static const String _cachePrefix = 'wg_cache_';
 
@@ -287,8 +290,12 @@ class WGData {
   static void _notifyAndCache() {
     version.value++;
 
-    // Never make UI updates wait for disk I/O.
-    unawaited(_saveCache());
+    _cacheSaveTimer?.cancel();
+
+    _cacheSaveTimer = Timer(const Duration(milliseconds: 250), () {
+      _cacheSaveTimer = null;
+      unawaited(_saveCache());
+    });
   }
 
   // ============================================================
@@ -1739,6 +1746,9 @@ class WGData {
   // ============================================================
 
   static Future<void> save() async {
+    _cacheSaveTimer?.cancel();
+    _cacheSaveTimer = null;
+
     await _saveCache();
 
     if (currentMemberId != null) {
