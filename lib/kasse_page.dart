@@ -250,7 +250,7 @@ class _KassePageState extends State<KassePage> {
           ),
         ],
       ),
-      body: total == 0 && WGData.expenses.isEmpty
+      body: WGData.expenses.isEmpty
           ? _buildEmptyState(context)
           : _buildContent(context, members, total),
       floatingActionButton: FloatingActionButton(
@@ -303,7 +303,7 @@ class _KassePageState extends State<KassePage> {
       children: [
         _buildTotalCard(context, total, members.length),
         const SizedBox(height: 16),
-        if (total > 0) ...[
+        if (WGData.expenses.isNotEmpty) ...[
           _buildChartCard(context),
           const SizedBox(height: 16),
         ],

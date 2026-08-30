@@ -57,6 +57,17 @@ ALTER TABLE shopping_items
     REFERENCES members(id) ON DELETE SET NULL;
 
 -- ============================================================
+-- CHAT_MESSAGES: Add reference columns for task/shopping item mentions
+-- ============================================================
+ALTER TABLE chat_messages
+    ADD COLUMN IF NOT EXISTS reference_id UUID;
+
+ALTER TABLE chat_messages
+    ADD COLUMN IF NOT EXISTS reference_type TEXT CHECK (
+        reference_type IN ('task', 'shopping_item')
+    );
+
+-- ============================================================
 -- TASKS: Add added_by column (for notifications)
 -- ============================================================
 ALTER TABLE tasks

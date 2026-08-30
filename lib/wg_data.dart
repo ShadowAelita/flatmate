@@ -216,6 +216,36 @@ class WGData {
     return null;
   }
 
+  static String? resolveReferenceDescription(
+    String? referenceId,
+    String? referenceType,
+  ) {
+    if (referenceId == null || referenceType == null) {
+      return null;
+    }
+
+    switch (referenceType) {
+      case 'task':
+        for (final task in tasks) {
+          if (task['id']?.toString() == referenceId) {
+            return task['title']?.toString() ?? task['text']?.toString();
+          }
+        }
+
+        return 'Aufgabe';
+      case 'shopping_item':
+        for (final item in shoppingItems) {
+          if (item['id']?.toString() == referenceId) {
+            return item['name']?.toString() ?? item['text']?.toString();
+          }
+        }
+
+        return 'Einkauf';
+      default:
+        return null;
+    }
+  }
+
   // ============================================================
   // INITIALIZATION
   // ============================================================
@@ -1648,6 +1678,8 @@ class WGData {
       'timestamp': row['timestamp'],
       'edited': row['edited'] ?? false,
       'replyTo': row['reply_to'],
+      'referenceId': row['reference_id'],
+      'referenceType': row['reference_type'],
     };
   }
 
@@ -2517,6 +2549,8 @@ class WGData {
     required String text,
     required String senderId,
     String? replyTo,
+    String? referenceId,
+    String? referenceType,
   }) async {
     if (householdId == null) {
       return null;
@@ -2532,6 +2566,8 @@ class WGData {
       'timestamp': timestamp,
       'edited': false,
       'replyTo': replyTo,
+      'referenceId': referenceId,
+      'referenceType': referenceType,
     };
 
     chatMessages.add(message);
@@ -2546,6 +2582,8 @@ class WGData {
       'timestamp': timestamp,
       'edited': false,
       'reply_to': replyTo,
+      'reference_id': referenceId,
+      'reference_type': referenceType,
     };
 
     try {

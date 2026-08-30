@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'shopping_page.dart';
+import 'task_page.dart';
 import 'wg_data.dart';
 
 class ChatPage extends StatefulWidget {
@@ -18,6 +20,8 @@ class _ChatPageState extends State<ChatPage> {
   final Map<String, GlobalKey> _messageKeys = {};
 
   Map<String, dynamic>? _replyingTo;
+  String? _referenceId;
+  String? _referenceType;
   String? _highlightedMessageId;
   Timer? _highlightTimer;
   VoidCallback? _versionListener;
@@ -26,9 +30,9 @@ class _ChatPageState extends State<ChatPage> {
     final text = _controller.text.trim();
     final member = WGData.currentMember;
 
-    if (text.isEmpty || member == null) {
-      return;
-    }
+     if ((text.isEmpty && _referenceId == null) || member == null) {
+       return;
+     }
 
     final replyToId = _replyingTo?['id']?.toString();
 
@@ -36,6 +40,8 @@ class _ChatPageState extends State<ChatPage> {
       text: text,
       senderId: member.id,
       replyTo: replyToId,
+      referenceId: _referenceId,
+      referenceType: _referenceType,
     );
 
     if (!mounted || message == null) {
@@ -44,6 +50,8 @@ class _ChatPageState extends State<ChatPage> {
 
     setState(() {
       _replyingTo = null;
+      _referenceId = null;
+      _referenceType = null;
     });
 
     _controller.clear();
@@ -455,6 +463,322 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  Widget _buildReferenceBadge(String? referenceId, String? referenceType) {
+    final description = WGData.resolveReferenceDescription(
+      referenceId,
+      referenceType,
+    );
+
+    if (description == null) {
+      return const SizedBox.shrink();
+    }
+
+    IconData icon;
+
+    switch (referenceType) {
+      case 'task':
+        icon = Icons.task_outlined;
+        break;
+      case 'shopping_item':
+        icon = Icons.shopping_cart_outlined;
+        break;
+      default:
+        icon = Icons.link;
+    }
+
+    return GestureDetector(
+      onTap: () {
+        if (referenceType == 'task') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const TaskPage()),
+          );
+        } else if (referenceType == 'shopping_item') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const ShoppingPage()),
+          );
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outline,
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14),
+            const SizedBox(width: 4),
+            Text(
+              description,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReferencePreview() {
+    if (_referenceId == null || _referenceType == null) {
+      return const SizedBox.shrink();
+    }
+
+    final description = WGData.resolveReferenceDescription(
+      _referenceId,
+      _referenceType,
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        border: Border(
+          left: BorderSide(
+            color: Theme.of(context).colorScheme.primary,
+            width: 4,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Referenz: ${_referenceType == 'task' ? 'Aufgabe' : 'Einkauf'}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  description ?? 'Unbekannt',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _referenceId = null;
+                _referenceType = null;
+              });
+            },
+            icon: const Icon(Icons.close, size: 16),
+            tooltip: 'Referenz entfernen',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showReferenceSelector() async {
+    String? selectedType;
+    String? selectedId;
+    String? selectedDescription;
+
+    final result = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return ValueListenableBuilder<int>(
+          valueListenable: WGData.version,
+          builder: (context, _, child) {
+            return StatefulBuilder(
+              builder: (context, setSheetState) {
+                return SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                          child: Text(
+                            'Referenz auswählen',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        if (WGData.tasks.isNotEmpty) ...[
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                            child: Text(
+                              'Aufgaben',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          ...WGData.tasks.map((task) {
+                            final taskId = task['id']?.toString() ?? '';
+                            final taskTitle =
+                                task['title']?.toString() ??
+                                task['text']?.toString() ??
+                                'Unbekannt';
+                            final isSelected = selectedId == taskId;
+
+                            return ListTile(
+                              leading: Icon(
+                                Icons.task_outlined,
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : null,
+                              ),
+                              title: Text(taskTitle),
+                              trailing: isSelected
+                                  ? const Icon(Icons.check, size: 18)
+                                  : null,
+                              selected: isSelected,
+                              onTap: () {
+                                setSheetState(() {
+                                  selectedType = 'task';
+                                  selectedId = taskId;
+                                  selectedDescription = taskTitle;
+                                });
+                              },
+                              onLongPress: () {
+                                Navigator.pop(context);
+                                _navigateToTask(taskId);
+                              },
+                            );
+                          }),
+                        ],
+                        if (WGData.shoppingItems.isNotEmpty) ...[
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                            child: Text(
+                              'Einkauf',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          ...WGData.shoppingItems.map((item) {
+                            final itemId = item['id']?.toString() ?? '';
+                            final itemName =
+                                item['name']?.toString() ??
+                                item['text']?.toString() ??
+                                'Unbekannt';
+                            final isSelected = selectedId == itemId;
+
+                            return ListTile(
+                              leading: Icon(
+                                Icons.shopping_cart_outlined,
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : null,
+                              ),
+                              title: Text(itemName),
+                              trailing: isSelected
+                                  ? const Icon(Icons.check, size: 18)
+                                  : null,
+                              selected: isSelected,
+                              onTap: () {
+                                setSheetState(() {
+                                  selectedType = 'shopping_item';
+                                  selectedId = itemId;
+                                  selectedDescription = itemName;
+                                });
+                              },
+                              onLongPress: () {
+                                Navigator.pop(context);
+                                _navigateToShopping();
+                              },
+                            );
+                          }),
+                        ],
+                        const SizedBox(height: 12),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                  },
+                                  child: const Text('Abbrechen'),
+                                ),
+                              ),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: selectedId != null
+                                      ? () {
+                                          Navigator.pop(context, {
+                                            'type': selectedType!,
+                                            'id': selectedId!,
+                                            'desc': selectedDescription!,
+                                          });
+                                        }
+                                      : null,
+                                  child: const Text('Fügen'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              });
+            },
+          );
+        },
+      );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    setState(() {
+      _referenceId = result['id'];
+      _referenceType = result['type'];
+    });
+  }
+
+  void _navigateToTask(String taskId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const TaskPage(),
+      ),
+    );
+  }
+
+  void _navigateToShopping() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const ShoppingPage(),
+      ),
+    );
+  }
+
   Widget _buildReplyPreview() {
     final message = _replyingTo;
 
@@ -628,7 +952,16 @@ class _ChatPageState extends State<ChatPage> {
                                     const SizedBox(height: 8),
                                   ],
 
-                                  Text(
+                                  if (message['referenceId'] != null &&
+                                      message['referenceType'] != null)
+                                    _buildReferenceBadge(
+                                      message['referenceId']?.toString(),
+                                      message['referenceType']?.toString(),
+                                    ),
+
+                                  if (message['text']?.toString().isNotEmpty ??
+                                      false)
+                                    Text(
                                     message['text']?.toString() ?? '',
                                     style: const TextStyle(fontSize: 16),
                                   ),
@@ -691,11 +1024,19 @@ class _ChatPageState extends State<ChatPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (_replyingTo != null) _buildReplyPreview(),
+                  if (_referenceId != null && _referenceType != null)
+                    _buildReferencePreview(),
 
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                     child: Row(
                       children: [
+                        IconButton.filled(
+                          onPressed: _showReferenceSelector,
+                          icon: const Icon(Icons.add),
+                          tooltip: 'Referenz hinzufügen',
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: TextField(
                             controller: _controller,
