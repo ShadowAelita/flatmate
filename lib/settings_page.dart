@@ -216,6 +216,7 @@ class SettingsPage extends StatelessWidget {
                         currentVersion: result.currentVersion,
                         latestVersion: result.latestVersion,
                         releaseUrl: result.releaseUrl,
+                        apkUrl: result.apkUrl,
                       );
                     } else {
                       final snackBar = SnackBar(

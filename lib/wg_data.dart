@@ -1737,6 +1737,19 @@ class WGData {
           .eq('household_id', householdId!)
           .order('created_at', ascending: false);
 
+      final hasPendingExpenseInserts = _pendingOperations.any(
+        (op) => op['type']?.toString() == 'expense_insert',
+      );
+
+      if (response.isEmpty && hasPendingExpenseInserts) {
+        debugPrint(
+          'Expenses: keeping local data '
+          '(server empty but pending inserts exist).',
+        );
+
+        return;
+      }
+
       expenses.clear();
 
       for (final row in response) {
@@ -2282,13 +2295,18 @@ class WGData {
       'created_at': timestamp,
     };
 
-    try {
-      await _supabase.from('expenses').insert(data);
-      _isOnline = true;
-    } catch (error) {
-      _isOnline = false;
-      await _queueOperation('expense_insert', data);
-    }
+        try {
+          await _supabase.from('expenses').insert(data);
+          _isOnline = true;
+        } catch (error) {
+          debugPrint(
+            'Expense insert to Supabase failed: $error '
+            '(table may lack RLS policy or required columns). '
+            'Queuing for retry.',
+          );
+          _isOnline = false;
+          await _queueOperation('expense_insert', data);
+        }
   }
 
   static Future<void> updateExpense({
