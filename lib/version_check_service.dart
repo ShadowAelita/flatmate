@@ -11,7 +11,7 @@ class VersionCheckService {
   static final VersionCheckService instance = VersionCheckService._private();
 
   static const String _versionJsonUrl =
-      'https://raw.githubusercontent.com/lukicm/flatmate-updates/main/version.json';
+      'https://raw.githubusercontent.com/ShadowAelita/flatmate-updates/main/version.json';
 
   String? _cachedCurrentVersion;
 
