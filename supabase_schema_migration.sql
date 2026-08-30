@@ -162,6 +162,17 @@ CREATE POLICY "Allow all for expense_categories" ON expense_categories
     FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================
+-- GRANT TABLE PRIVILEGES TO ANON ROLE
+-- ============================================================
+-- RLS policies control row-level access, but PostgreSQL also
+-- requires table-level privileges for the anon role to perform
+-- CRUD operations. Without these GRANTs, the REST API returns
+-- "permission denied" even when policies allow all operations.
+-- ============================================================
+GRANT SELECT, INSERT, UPDATE, DELETE ON expenses TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON expense_categories TO anon;
+
+-- ============================================================
 -- Helper: Generate a new invite code (call from a Postgres function)
 -- ============================================================
 CREATE OR REPLACE FUNCTION refresh_invite_code(household_id UUID)
