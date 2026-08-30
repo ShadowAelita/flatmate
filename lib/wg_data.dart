@@ -6,15 +6,20 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'notifications/notification_preferences.dart';
+import 'notifications/notification_service.dart';
+
 class WGMember {
   final String id;
   final String name;
   final int colorIndex;
+  final bool isAdmin;
 
   const WGMember({
     required this.id,
     required this.name,
     required this.colorIndex,
+    this.isAdmin = false,
   });
 }
 
@@ -23,10 +28,22 @@ class WGData {
   static final List<Map<String, dynamic>> shoppingItems = [];
   static final List<Map<String, dynamic>> tasks = [];
   static final List<Map<String, dynamic>> chatMessages = [];
+  static final List<Map<String, dynamic>> expenses = [];
+  static final List<String> expenseCategories = [];
   static List<Map<String, dynamic>> _pendingOperations = [];
 
   static String? householdId;
   static String? currentMemberId;
+  static String? _householdName;
+  static String? _inviteCode;
+
+  static int _unreadMessageCount = 0;
+  static String? _lastReadTimestamp;
+
+  static NotificationPreferences? _notificationPrefs;
+
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
 
   static final ValueNotifier<int> version = ValueNotifier<int>(0);
 
@@ -40,6 +57,8 @@ class WGData {
   static Future<void>? _syncFuture;
 
   static Timer? _cacheSaveTimer;
+
+  static final Set<String> _notifiedTaskDueToday = {};
 
   static bool _isOnline = false;
 
@@ -55,8 +74,129 @@ class WGData {
     Colors.purple,
   ];
 
+  static const List<String> defaultExpenseCategories = [
+    'Lebensmittel',
+    'Nebenkosten',
+    'Miete',
+    'Freizeit',
+    'Sonstiges',
+  ];
+
+  static List<String> get allExpenseCategories {
+    final combined = List<String>.from(defaultExpenseCategories);
+
+    for (final cat in expenseCategories) {
+      if (!combined.contains(cat)) {
+        combined.add(cat);
+      }
+    }
+
+    return combined;
+  }
+
   static bool get isOnline => _isOnline;
+
+  static Future<String?> testConnection() async {
+    try {
+      await _supabase
+          .from('households')
+          .select('id')
+          .limit(1)
+          .timeout(const Duration(seconds: 8));
+
+      return null;
+    } catch (error) {
+      return _classifyError(error).error;
+    }
+  }
   static bool get hasPendingOperations => _readPendingOperations().isNotEmpty;
+
+  static String? get householdName => _householdName;
+  static String? get inviteCode => _inviteCode;
+  static int get unreadMessageCount => _unreadMessageCount;
+  static bool get isAdmin => currentMember?.isAdmin ?? false;
+
+  static double get totalExpenses {
+    var total = 0.0;
+
+    for (final expense in expenses) {
+      if (expense['excludeFromBalance'] == true) continue;
+
+      final amount = double.tryParse(
+            expense['amount']?.toString() ?? '',
+          ) ??
+          0.0;
+
+      total += amount;
+    }
+
+    return total;
+  }
+
+  static double get totalExpensesIncludingExcluded {
+    var total = 0.0;
+
+    for (final expense in expenses) {
+      final amount = double.tryParse(
+            expense['amount']?.toString() ?? '',
+          ) ??
+          0.0;
+
+      total += amount;
+    }
+
+    return total;
+  }
+
+  static Map<String, double> get expensesByMember {
+    final result = <String, double>{};
+
+    for (final member in members) {
+      result[member.id] = 0.0;
+    }
+
+    for (final expense in expenses) {
+      if (expense['excludeFromBalance'] == true) continue;
+
+      final paidBy = expense['paidBy']?.toString();
+
+      if (paidBy != null && result.containsKey(paidBy)) {
+        final amount = double.tryParse(
+              expense['amount']?.toString() ?? '',
+            ) ??
+            0.0;
+
+        result[paidBy] = (result[paidBy] ?? 0.0) + amount;
+      }
+    }
+
+    return result;
+  }
+
+  static double get currentMemberExpenses {
+    final memberId = currentMemberId;
+
+    if (memberId == null) return 0.0;
+
+    return expensesByMember[memberId] ?? 0.0;
+  }
+
+  static double get perPersonShare {
+    if (members.isEmpty) return 0.0;
+
+    return totalExpenses / members.length;
+  }
+
+  static double get currentMemberBalance {
+    final share = perPersonShare;
+    final paid = currentMemberExpenses;
+
+    return paid - share;
+  }
+
+  static void setNotificationPreferences(NotificationPreferences prefs) {
+    _notificationPrefs = prefs;
+  }
 
   static Color memberColor(WGMember member) {
     return memberColors[member.colorIndex % memberColors.length];
@@ -145,6 +285,9 @@ class WGData {
 
     householdId = prefs.getString('householdId');
     currentMemberId = prefs.getString('currentMemberId');
+    _householdName = prefs.getString('householdName');
+    _inviteCode = prefs.getString('inviteCode');
+    _lastReadTimestamp = prefs.getString('wg_last_read_$householdId');
 
     _loadCache();
     _loadPendingOperations();
@@ -174,45 +317,18 @@ class WGData {
       return;
     }
 
-    // ------------------------------------------------------------
-    // First installation
+     // ------------------------------------------------------------
+    // First installation — no household yet.
     // ------------------------------------------------------------
     //
-    // There is no cached household yet, so we have no choice but
-    // to create one online.
+    // The user must create or join a flatshare via the RegisterPage.
+    // We do NOT auto-create a household here anymore.
     //
-    try {
-      debugPrint('WGData startup: creating household');
-
-      final response = await _supabase
-          .from('households')
-          .insert({'name': 'Unsere WG'})
-          .select()
-          .single()
-          .timeout(const Duration(seconds: 6));
-
-      householdId = response['id'] as String;
-
-      await prefs.setString('householdId', householdId!);
-
-      unawaited(_subscribeToRealtime());
-      unawaited(_syncOnline());
-
-      debugPrint(
-        'WGData startup: household created '
-        '${stopwatch.elapsedMilliseconds}ms',
-      );
-    } catch (error) {
-      debugPrint('Could not create household: $error');
-
-      _isOnline = false;
-      version.value++;
-
-      debugPrint(
-        'WGData startup: finished without household '
-        '${stopwatch.elapsedMilliseconds}ms',
-      );
-    }
+    debugPrint(
+      'WGData startup: no household found, '
+      'waiting for user to create/join '
+      '${stopwatch.elapsedMilliseconds}ms',
+    );
   }
 
   // ============================================================
@@ -267,6 +383,7 @@ class WGData {
               id: row['id'].toString(),
               name: row['name']?.toString() ?? '',
               colorIndex: row['colorIndex'] as int? ?? 0,
+              isAdmin: row['isAdmin'] as bool? ?? false,
             ),
           );
         }
@@ -311,6 +428,29 @@ class WGData {
         }
       }
 
+      expenses.clear();
+
+      final cachedExpenses = cached['expenses'];
+
+      if (cachedExpenses is List) {
+        for (final row in cachedExpenses) {
+          if (row is Map) {
+            expenses.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      expenseCategories.clear();
+      final cachedCategories = cached['expenseCategories'];
+
+      if (cachedCategories is List) {
+        for (final cat in cachedCategories) {
+          if (cat is String) {
+            expenseCategories.add(cat);
+          }
+        }
+      }
+
       _sortTasksLocally();
     } catch (error) {
       debugPrint('Could not load local cache: $error');
@@ -325,18 +465,23 @@ class WGData {
     try {
       final data = <String, dynamic>{
         'savedAt': DateTime.now().toIso8601String(),
+        'householdName': _householdName,
+        'inviteCode': _inviteCode,
         'members': members
             .map(
               (member) => {
                 'id': member.id,
                 'name': member.name,
                 'colorIndex': member.colorIndex,
+                'isAdmin': member.isAdmin,
               },
             )
             .toList(),
         'tasks': tasks.map(Map<String, dynamic>.from).toList(),
         'shoppingItems': shoppingItems.map(Map<String, dynamic>.from).toList(),
         'chatMessages': chatMessages.map(Map<String, dynamic>.from).toList(),
+        'expenses': expenses.map(Map<String, dynamic>.from).toList(),
+        'expenseCategories': List<String>.from(expenseCategories),
       };
 
       await _prefs!.setString(_cacheKey, jsonEncode(data));
@@ -567,6 +712,38 @@ class WGData {
             .eq('household_id', householdId!);
         break;
 
+      case 'expense_insert':
+        await _supabase.from('expenses').insert(data);
+        break;
+
+      case 'expense_update':
+        await _supabase
+            .from('expenses')
+            .update(Map<String, dynamic>.from(data['updates'] as Map))
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'expense_delete':
+        await _supabase
+            .from('expenses')
+            .delete()
+            .eq('id', data['id'])
+            .eq('household_id', householdId!);
+        break;
+
+      case 'expense_category_insert':
+        await _supabase.from('expense_categories').insert(data);
+        break;
+
+      case 'expense_category_delete':
+        await _supabase
+            .from('expense_categories')
+            .delete()
+            .eq('household_id', householdId!)
+            .eq('name', data['name']);
+        break;
+
       default:
         throw Exception('Unknown offline operation: $type');
     }
@@ -605,15 +782,20 @@ class WGData {
       await _flushPendingOperations();
 
       await Future.wait([
+        _loadHouseholdInfo(),
         _loadMembers(),
         _loadTasks(),
         _loadShoppingItems(),
         _loadChatMessages(),
+        _loadExpenses(),
+        _loadExpenseCategories(),
       ]).timeout(const Duration(seconds: 8));
 
       _isOnline = true;
 
       await _saveCache();
+
+      _checkDueTodayTasks();
 
       version.value++;
     } catch (error) {
@@ -715,6 +897,36 @@ class WGData {
       },
     );
 
+    // ------------------------------------------------------------
+    // EXPENSES
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'expenses',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleExpensesRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    // ------------------------------------------------------------
+    // EXPENSE_CATEGORIES
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'expense_categories',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleExpenseCategoriesRealtime(payload);
+        });
+      },
+    );
+
     _realtimeChannel = channel;
 
     channel.subscribe((status, error) {
@@ -785,13 +997,16 @@ class WGData {
           return;
         }
 
-        members.add(
-          WGMember(
-            id: id,
-            name: newRecord['name']?.toString() ?? '',
-            colorIndex: newRecord['color_index'] as int? ?? 0,
-          ),
+        final newMember = WGMember(
+          id: id,
+          name: newRecord['name']?.toString() ?? '',
+          colorIndex: newRecord['color_index'] as int? ?? 0,
+          isAdmin: newRecord['is_admin'] as bool? ?? false,
         );
+
+        members.add(newMember);
+
+        _triggerMemberJoinedNotification(newMember);
         break;
 
       case PostgresChangeEvent.update:
@@ -801,6 +1016,7 @@ class WGData {
           id: id,
           name: newRecord['name']?.toString() ?? '',
           colorIndex: newRecord['color_index'] as int? ?? 0,
+          isAdmin: newRecord['is_admin'] as bool? ?? false,
         );
 
         if (index == -1) {
@@ -811,12 +1027,21 @@ class WGData {
         break;
 
       case PostgresChangeEvent.delete:
+        final deletedMember = members.firstWhere(
+          (member) => member.id == id,
+          orElse: () => const WGMember(id: '', name: '', colorIndex: 0),
+        );
+
         members.removeWhere((member) => member.id == id);
 
         if (currentMemberId == id) {
           currentMemberId = null;
 
           unawaited(_prefs?.remove('currentMemberId'));
+        }
+
+        if (deletedMember.id.isNotEmpty) {
+          _triggerMemberLeftNotification(deletedMember);
         }
         break;
 
@@ -850,7 +1075,10 @@ class WGData {
           return;
         }
 
-        tasks.add(_taskFromRow(newRecord));
+        final newTask = _taskFromRow(newRecord);
+        tasks.add(newTask);
+
+        _triggerTaskAssignedNotification(newTask);
         break;
 
       case PostgresChangeEvent.update:
@@ -868,7 +1096,14 @@ class WGData {
         if (index == -1) {
           tasks.add(updated);
         } else {
+          final oldAssignedTo = tasks[index]['assignedTo']?.toString();
+          final newAssignedTo = newRecord['assigned_to']?.toString();
+
           tasks[index] = updated;
+
+          if (newAssignedTo != oldAssignedTo) {
+            _triggerTaskAssignedNotification(updated);
+          }
         }
         break;
 
@@ -881,8 +1116,6 @@ class WGData {
     }
 
     _sortTasksLocally();
-    // addChatMessage()
-
     _sortChatMessages();
     _notifyAndCache();
   }
@@ -910,7 +1143,10 @@ class WGData {
           return;
         }
 
-        shoppingItems.add(_shoppingFromRow(newRecord));
+        final newItem = _shoppingFromRow(newRecord);
+        shoppingItems.add(newItem);
+
+        _triggerShoppingNotification(newItem);
         break;
 
       case PostgresChangeEvent.update:
@@ -961,7 +1197,10 @@ class WGData {
           return;
         }
 
-        chatMessages.add(_chatFromRow(newRecord));
+        final newMessage = _chatFromRow(newRecord);
+        chatMessages.add(newMessage);
+
+        _handleNewChatMessage(newMessage);
         break;
 
       case PostgresChangeEvent.update:
@@ -1007,6 +1246,369 @@ class WGData {
     _notifyAndCache();
   }
 
+  static void _handleExpensesRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    final id = (newRecord['id'] ?? oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (expenses.any((e) => e['id']?.toString() == id)) {
+          return;
+        }
+
+        expenses.add(_expenseFromRow(newRecord));
+        _notifyAndCache();
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = expenses.indexWhere(
+          (e) => e['id']?.toString() == id,
+        );
+
+        final updated = _expenseFromRow(newRecord);
+
+        if (index == -1) {
+          expenses.add(updated);
+        } else {
+          expenses[index] = updated;
+        }
+
+        _notifyAndCache();
+        break;
+
+      case PostgresChangeEvent.delete:
+        expenses.removeWhere((e) => e['id']?.toString() == id);
+        _notifyAndCache();
+        break;
+
+      default:
+        return;
+    }
+  }
+
+  static void _handleExpenseCategoriesRealtime(
+    PostgresChangePayload payload,
+  ) {
+    final newRecord = payload.newRecord;
+    final oldRecord = payload.oldRecord;
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        final name = newRecord['name']?.toString();
+
+        if (name != null && !expenseCategories.contains(name)) {
+          expenseCategories.add(name);
+          _notifyAndCache();
+        }
+        break;
+
+      case PostgresChangeEvent.delete:
+        final name = oldRecord['name']?.toString();
+
+        if (name != null && expenseCategories.contains(name)) {
+          expenseCategories.remove(name);
+          _notifyAndCache();
+        }
+        break;
+
+      default:
+        return;
+    }
+  }
+
+  // ============================================================
+  // UNREAD MESSAGE TRACKING
+  // ============================================================
+
+  static Future<void> _saveLastReadTimestamp(String timestamp) async {
+    _lastReadTimestamp = timestamp;
+
+    if (_prefs == null || householdId == null) {
+      return;
+    }
+
+    try {
+      await _prefs!.setString(
+        'wg_last_read_$householdId',
+        timestamp,
+      );
+    } catch (error) {
+      debugPrint('Could not save last read timestamp: $error');
+    }
+  }
+
+   static Future<void> markMessagesRead() async {
+    final lastMessage = chatMessages.isNotEmpty
+        ? chatMessages.last['timestamp']?.toString()
+        : null;
+
+    if (lastMessage != null) {
+      _lastReadTimestamp = lastMessage;
+    }
+
+    _unreadMessageCount = 0;
+
+    if (lastMessage != null) {
+      await _saveLastReadTimestamp(lastMessage);
+    }
+  }
+
+  static void _recalculateUnreadCount() {
+    final lastRead =
+        _lastReadTimestamp != null
+            ? DateTime.tryParse(_lastReadTimestamp!)
+            : null;
+
+    _unreadMessageCount = chatMessages.where((message) {
+      final senderId = message['senderId']?.toString();
+
+      if (senderId == currentMemberId) return false;
+
+      if (lastRead == null) return true;
+
+      final messageTime = DateTime.tryParse(
+        message['timestamp']?.toString() ?? '',
+      );
+
+      if (messageTime == null) return false;
+
+      return messageTime.isAfter(lastRead);
+    }).length;
+  }
+
+  static void _handleNewChatMessage(Map<String, dynamic> message) {
+    final senderId = message['senderId']?.toString();
+
+    if (senderId != currentMemberId && _lastReadTimestamp != null) {
+      final messageTime = DateTime.tryParse(
+        message['timestamp']?.toString() ?? '',
+      );
+
+      final lastRead = DateTime.tryParse(_lastReadTimestamp!);
+
+      if (lastRead == null ||
+          (messageTime != null && messageTime.isAfter(lastRead))) {
+        _unreadMessageCount++;
+      }
+    } else if (senderId != currentMemberId) {
+      _unreadMessageCount++;
+    }
+
+    _triggerChatNotification(message);
+  }
+
+  // ============================================================
+  // NOTIFICATION TRIGGERS
+  // ============================================================
+
+  static WGMember? _findMemberById(String? id) {
+    if (id == null) {
+      return null;
+    }
+
+    for (final member in members) {
+      if (member.id == id) {
+        return member;
+      }
+    }
+
+    return null;
+  }
+
+  static void _triggerChatNotification(Map<String, dynamic> message) {
+    final prefs = _notificationPrefs;
+
+    if (prefs == null || !prefs.chat) {
+      return;
+    }
+
+    final senderId = message['senderId']?.toString();
+    final sender = _findMemberById(senderId);
+
+    if (sender == null || senderId == currentMemberId) {
+      return;
+    }
+
+    final text = message['text']?.toString() ?? '';
+
+    if (text.isEmpty) {
+      return;
+    }
+
+    NotificationService.instance.showChatMessageNotification(
+      senderName: sender.name,
+      messageText: text,
+    );
+  }
+
+  static void _triggerShoppingNotification(Map<String, dynamic> item) {
+    final prefs = _notificationPrefs;
+
+    if (prefs == null || !prefs.shopping) {
+      return;
+    }
+
+    final currentMember = WGData.currentMember;
+
+    if (currentMember == null) {
+      return;
+    }
+
+    final addedBy = item['addedBy'] as String?;
+
+    if (addedBy != null && addedBy != currentMember.id) {
+      final member = _findMemberById(addedBy);
+
+      if (member != null) {
+        NotificationService.instance.showShoppingNotification(
+          personName: member.name,
+          itemName: item['name']?.toString() ?? '',
+        );
+      }
+    }
+  }
+
+  static void _triggerMemberJoinedNotification(WGMember member) {
+    final prefs = _notificationPrefs;
+
+    if (prefs == null || !prefs.general) {
+      return;
+    }
+
+    final currentMember = WGData.currentMember;
+
+    if (currentMember == null ||
+        member.id == currentMember.id) {
+      return;
+    }
+
+    NotificationService.instance.showMemberJoinedNotification(
+      memberName: member.name,
+    );
+  }
+
+  static void _triggerMemberLeftNotification(WGMember member) {
+    final prefs = _notificationPrefs;
+
+    if (prefs == null || !prefs.general) {
+      return;
+    }
+
+    final currentMember = WGData.currentMember;
+
+    if (currentMember == null ||
+        member.id == currentMember.id) {
+      return;
+    }
+
+    NotificationService.instance.showMemberLeftNotification(
+      memberName: member.name,
+    );
+  }
+
+  static void _triggerTaskAssignedNotification(
+    Map<String, dynamic> task,
+  ) {
+    final prefs = _notificationPrefs;
+
+    if (prefs == null || !prefs.taskAssignments) {
+      return;
+    }
+
+    final currentMember = WGData.currentMember;
+
+    if (currentMember == null) {
+      return;
+    }
+
+    final assignedTo = task['assignedTo']?.toString();
+
+    if (assignedTo != currentMember.id) {
+      return;
+    }
+
+    final memberId = task['addedBy'] as String?;
+
+    final assigner = memberId != null && memberId != currentMember.id
+        ? _findMemberById(memberId)
+        : null;
+
+    NotificationService.instance.showTaskAssignedNotification(
+      assigneeName: currentMember.name,
+      taskName: task['name']?.toString() ?? '',
+      assignerName: assigner?.name,
+    );
+  }
+
+  static void _checkDueTodayTasks() {
+    final prefs = _notificationPrefs;
+
+    if (prefs == null || !prefs.taskDueToday) {
+      return;
+    }
+
+    final currentMember = WGData.currentMember;
+
+    if (currentMember == null) {
+      return;
+    }
+
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+
+    for (final task in tasks) {
+      final taskId = task['id']?.toString();
+
+      if (taskId == null) continue;
+
+      final completed = task['completed'] == true;
+
+      if (completed) continue;
+
+      final dueDateValue = task['dueDate']?.toString();
+
+      if (dueDateValue == null) continue;
+
+      final dueDate = DateTime.tryParse(dueDateValue);
+
+      if (dueDate == null) continue;
+
+      final dueDateOnly =
+          DateTime(dueDate.year, dueDate.month, dueDate.day);
+
+      if (dueDateOnly != todayDate) continue;
+
+      final assignedTo = task['assignedTo']?.toString();
+      final isAssignedToCurrentUser = assignedTo == currentMember.id ||
+          assignedTo == null ||
+          assignedTo == 'nobody';
+
+      if (!isAssignedToCurrentUser) continue;
+
+      if (_notifiedTaskDueToday.contains(taskId)) continue;
+
+      _notifiedTaskDueToday.add(taskId);
+
+      NotificationService.instance.showTaskDueTodayNotification(
+        taskId: taskId,
+        taskName: task['name']?.toString() ?? 'Aufgabe',
+      );
+    }
+  }
+
   // ============================================================
   // ROW CONVERTERS
   // ============================================================
@@ -1023,6 +1625,7 @@ class WGData {
       'dueDate': row['due_date'],
       'repeat': row['repeat'] ?? 'none',
       'sortOrder': row['sort_order'] ?? fallbackSortOrder ?? 0,
+      'addedBy': row['added_by'],
     };
   }
 
@@ -1033,6 +1636,7 @@ class WGData {
       'completed': row['completed'] ?? false,
       'quantity': row['quantity'] ?? 1,
       'claimedBy': row['claimed_by'],
+      'addedBy': row['added_by'],
     };
   }
 
@@ -1047,16 +1651,100 @@ class WGData {
     };
   }
 
+  static Map<String, dynamic> _expenseFromRow(Map<String, dynamic> row) {
+    return {
+      'id': row['id'],
+      'description': row['description'],
+      'amount': row['amount'],
+      'paidBy': row['paid_by'],
+      'category': row['category'],
+      'excludeFromBalance': row['exclude_from_balance'] == true,
+      'createdAt': row['created_at'],
+    };
+  }
+
   // ============================================================
   // SERVER LOAD
   // ============================================================
+
+  static Future<void> _loadHouseholdInfo() async {
+    if (householdId == null) return;
+
+    try {
+      final response = await _supabase
+          .from('households')
+          .select('name, invite_code')
+          .eq('id', householdId!)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 8));
+
+      if (response != null) {
+        _householdName = response['name']?.toString();
+        _inviteCode = response['invite_code']?.toString();
+
+        if (_householdName != null) {
+          await _prefs?.setString('householdName', _householdName!);
+        }
+
+        if (_inviteCode != null) {
+          await _prefs?.setString('inviteCode', _inviteCode!);
+        }
+      }
+    } catch (error) {
+      debugPrint('Could not load household info: $error');
+    }
+  }
+
+  static Future<void> _loadExpenses() async {
+    if (householdId == null) return;
+
+    try {
+      final response = await _supabase
+          .from('expenses')
+          .select('*')
+          .eq('household_id', householdId!)
+          .order('created_at', ascending: false);
+
+      expenses.clear();
+
+      for (final row in response) {
+        expenses.add(_expenseFromRow(row));
+      }
+    } catch (error) {
+      debugPrint('Could not load expenses: $error');
+    }
+  }
+
+  static Future<void> _loadExpenseCategories() async {
+    if (householdId == null) return;
+
+    try {
+      final response = await _supabase
+          .from('expense_categories')
+          .select('name')
+          .eq('household_id', householdId!)
+          .order('name');
+
+      expenseCategories.clear();
+
+      for (final row in response) {
+        final name = row['name']?.toString();
+
+        if (name != null && !expenseCategories.contains(name)) {
+          expenseCategories.add(name);
+        }
+      }
+    } catch (error) {
+      debugPrint('Could not load expense categories: $error');
+    }
+  }
 
   static Future<void> _loadMembers() async {
     if (householdId == null) return;
 
     final response = await _supabase
         .from('members')
-        .select('id, name, color_index')
+        .select('*')
         .eq('household_id', householdId!)
         .order('created_at');
 
@@ -1068,6 +1756,7 @@ class WGData {
           id: row['id'] as String,
           name: row['name'] as String,
           colorIndex: row['color_index'] as int? ?? 0,
+          isAdmin: row['is_admin'] as bool? ?? false,
         ),
       );
     }
@@ -1084,9 +1773,7 @@ class WGData {
 
     final response = await _supabase
         .from('tasks')
-        .select(
-          'id, name, completed, assigned_to, due_date, repeat, sort_order',
-        )
+        .select('*')
         .eq('household_id', householdId!)
         .order('sort_order')
         .order('created_at');
@@ -1105,7 +1792,7 @@ class WGData {
 
     final response = await _supabase
         .from('shopping_items')
-        .select('id, name, completed, quantity, claimed_by, created_at')
+        .select('*')
         .eq('household_id', householdId!)
         .order('created_at');
 
@@ -1121,7 +1808,7 @@ class WGData {
 
     final response = await _supabase
         .from('chat_messages')
-        .select('id, text, sender_id, timestamp, edited, reply_to')
+        .select('*')
         .eq('household_id', householdId!)
         .order('timestamp');
 
@@ -1130,6 +1817,8 @@ class WGData {
     for (final row in response) {
       chatMessages.add(_chatFromRow(row));
     }
+
+    _recalculateUnreadCount();
   }
 
   // ============================================================
@@ -1200,6 +1889,7 @@ class WGData {
   static Future<WGMember?> addMember({
     required String name,
     required int colorIndex,
+    bool isAdmin = false,
   }) async {
     if (householdId == null) {
       return null;
@@ -1207,7 +1897,12 @@ class WGData {
 
     final id = _newId();
 
-    final member = WGMember(id: id, name: name, colorIndex: colorIndex);
+    final member = WGMember(
+      id: id,
+      name: name,
+      colorIndex: colorIndex,
+      isAdmin: isAdmin,
+    );
 
     members.add(member);
     _notifyAndCache();
@@ -1217,6 +1912,7 @@ class WGData {
       'household_id': householdId,
       'name': name,
       'color_index': colorIndex,
+      'is_admin': isAdmin,
     };
 
     try {
@@ -1240,7 +1936,13 @@ class WGData {
     final index = members.indexWhere((member) => member.id == id);
 
     if (index != -1) {
-      members[index] = WGMember(id: id, name: name, colorIndex: colorIndex);
+      final existing = members[index];
+      members[index] = WGMember(
+        id: id,
+        name: name,
+        colorIndex: colorIndex,
+        isAdmin: existing.isAdmin,
+      );
 
       _notifyAndCache();
     }
@@ -1326,6 +2028,7 @@ class WGData {
       'dueDate': dueDate,
       'repeat': repeat,
       'sortOrder': sortOrder,
+      'addedBy': currentMemberId,
     };
 
     tasks.add(task);
@@ -1341,6 +2044,7 @@ class WGData {
       'due_date': dueDate,
       'repeat': repeat,
       'sort_order': sortOrder,
+      'added_by': currentMemberId,
     };
 
     try {
@@ -1465,18 +2169,22 @@ class WGData {
   static Future<void> addShoppingItem({
     required String name,
     int quantity = 1,
+    String? addedBy,
   }) async {
     if (householdId == null) return;
 
     final id = _newId();
 
-    shoppingItems.add({
+    final item = {
       'id': id,
       'name': name,
       'completed': false,
       'quantity': quantity,
       'claimedBy': null,
-    });
+      'addedBy': addedBy ?? currentMemberId,
+    };
+
+    shoppingItems.add(item);
 
     _notifyAndCache();
 
@@ -1487,6 +2195,7 @@ class WGData {
       'completed': false,
       'quantity': quantity,
       'claimed_by': null,
+      'added_by': addedBy ?? currentMemberId,
     };
 
     try {
@@ -1494,9 +2203,222 @@ class WGData {
       _isOnline = true;
     } catch (error) {
       _isOnline = false;
-
       await _queueOperation('shopping_insert', data);
     }
+
+    _triggerShoppingNotification(item);
+  }
+
+  // ============================================================
+  // EXPENSES (WG-Kasse)
+  // ============================================================
+
+  static Future<void> addExpense({
+    required String description,
+    required double amount,
+    String? paidBy,
+    String? category,
+    bool excludeFromBalance = false,
+  }) async {
+    if (householdId == null) return;
+
+    final id = _newId();
+    final timestamp = DateTime.now().toIso8601String();
+
+    final expense = {
+      'id': id,
+      'description': description,
+      'amount': amount,
+      'paidBy': paidBy ?? currentMemberId,
+      'category': category,
+      'excludeFromBalance': excludeFromBalance,
+      'createdAt': timestamp,
+    };
+
+    expenses.insert(0, expense);
+
+    _notifyAndCache();
+
+    final data = {
+      'id': id,
+      'household_id': householdId,
+      'description': description,
+      'amount': amount,
+      'paid_by': paidBy ?? currentMemberId,
+      'category': category,
+      'exclude_from_balance': excludeFromBalance,
+      'created_at': timestamp,
+    };
+
+    try {
+      await _supabase.from('expenses').insert(data);
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+      await _queueOperation('expense_insert', data);
+    }
+  }
+
+  static Future<void> updateExpense({
+    required String id,
+    String? description,
+    double? amount,
+    String? paidBy,
+    String? category,
+    bool? excludeFromBalance,
+  }) async {
+    if (householdId == null) return;
+
+    final index = expenses.indexWhere(
+      (e) => e['id']?.toString() == id,
+    );
+
+    if (index == -1) return;
+
+    final updates = <String, dynamic>{};
+
+    if (description != null) {
+      expenses[index]['description'] = description;
+      updates['description'] = description;
+    }
+
+    if (amount != null) {
+      expenses[index]['amount'] = amount;
+      updates['amount'] = amount;
+    }
+
+    if (paidBy != null) {
+      expenses[index]['paidBy'] = paidBy;
+      updates['paid_by'] = paidBy;
+    }
+
+    if (category != null) {
+      expenses[index]['category'] = category;
+      updates['category'] = category;
+    }
+
+    if (excludeFromBalance != null) {
+      expenses[index]['excludeFromBalance'] = excludeFromBalance;
+      updates['exclude_from_balance'] = excludeFromBalance;
+    }
+
+    if (updates.isEmpty) return;
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('expenses')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+      await _queueOperation('expense_update', {
+        'id': id,
+        'updates': updates,
+      });
+    }
+  }
+
+  static Future<void> deleteExpense(String id) async {
+    if (householdId == null) return;
+
+    final index = expenses.indexWhere(
+      (e) => e['id']?.toString() == id,
+    );
+
+    if (index == -1) return;
+
+    expenses.removeAt(index);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('expenses')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+      await _queueOperation('expense_delete', {'id': id});
+    }
+  }
+
+  static Future<void> addExpenseCategory(String name) async {
+    final trimmed = name.trim();
+
+    if (trimmed.isEmpty || expenseCategories.contains(trimmed)) return;
+
+    expenseCategories.add(trimmed);
+
+    _notifyAndCache();
+
+    if (householdId == null) return;
+
+    try {
+      await _supabase.from('expense_categories').insert({
+        'household_id': householdId,
+        'name': trimmed,
+        'is_default': false,
+      });
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+      await _queueOperation('expense_category_insert', {'name': trimmed});
+    }
+  }
+
+  static Future<void> deleteExpenseCategory(String name) async {
+    expenseCategories.remove(name);
+
+    _notifyAndCache();
+
+    if (householdId == null) return;
+
+    try {
+      await _supabase
+          .from('expense_categories')
+          .delete()
+          .eq('household_id', householdId!)
+          .eq('name', name);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+    }
+  }
+
+  static Map<String, double> expensesByCategoryInDateRange(
+    DateTime start,
+    DateTime end,
+  ) {
+    final result = <String, double>{};
+
+    for (final e in expenses) {
+      final createdAt = e['createdAt']?.toString();
+
+      if (createdAt == null) continue;
+
+      final date = DateTime.tryParse(createdAt);
+
+      if (date == null) continue;
+
+      if (date.isBefore(start) || date.isAfter(end)) continue;
+
+      final category = e['category']?.toString() ?? 'Sonstiges';
+      final amount = double.tryParse(e['amount']?.toString() ?? '0') ?? 0.0;
+
+      result[category] = (result[category] ?? 0.0) + amount;
+    }
+
+    return result;
   }
 
   static Future<void> updateShoppingItem({
@@ -1612,16 +2534,8 @@ class WGData {
       'replyTo': replyTo,
     };
 
-    // addChatMessage()
     chatMessages.add(message);
     _sortChatMessages();
-
-    chatMessages.sort((a, b) {
-      return (a['timestamp']?.toString() ?? '').compareTo(
-        b['timestamp']?.toString() ?? '',
-      );
-    });
-
     _notifyAndCache();
 
     final data = {
@@ -1727,6 +2641,7 @@ class WGData {
       await _prefs?.setString('currentMemberId', id);
     }
 
+    _recalculateUnreadCount();
     version.value++;
   }
 
@@ -1799,6 +2714,240 @@ class WGData {
   }
 
   // ============================================================
+  // HOUSEHOLD MANAGEMENT
+  // ============================================================
+
+  static String _generateInviteCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final random = Random.secure();
+    final buffer = StringBuffer();
+
+    for (var i = 0; i < 6; i++) {
+      buffer.write(chars[random.nextInt(chars.length)]);
+    }
+
+    return buffer.toString();
+  }
+  static Future<HouseholdJoinResult> createHousehold({
+    required String householdName,
+    required String memberName,
+    required int colorIndex,
+  }) async {
+    try {
+      final code = _generateInviteCode();
+
+      final response = await _supabase
+          .from('households')
+          .insert({
+            'name': householdName,
+            'invite_code': code,
+          })
+          .select('id, name, invite_code')
+          .single()
+          .timeout(const Duration(seconds: 8));
+
+      householdId = response['id'] as String;
+      _householdName = response['name'] as String? ?? householdName;
+      _inviteCode = response['invite_code'] as String? ?? code;
+
+      await _prefs?.setString('householdId', householdId!);
+      await _prefs?.setString('householdName', _householdName!);
+      await _prefs?.setString('inviteCode', _inviteCode!);
+
+      await _prefs?.setString('wg_last_read_$householdId', '');
+
+      final newMember = await addMember(
+        name: memberName,
+        colorIndex: colorIndex,
+        isAdmin: true,
+      );
+
+      if (newMember != null) {
+        currentMemberId = newMember.id;
+        await _prefs?.setString('currentMemberId', newMember.id);
+      }
+
+      version.value++;
+
+      unawaited(_subscribeToRealtime());
+      unawaited(_syncOnline());
+
+      return const HouseholdJoinResult(success: true);
+    } catch (error) {
+      debugPrint('Could not create household: $error');
+
+      return _classifyError(error);
+    }
+  }
+
+  static Future<HouseholdJoinResult> joinHouseholdByInviteCode({
+    required String inviteCode,
+    required String memberName,
+    required int colorIndex,
+  }) async {
+    final trimmedCode = inviteCode.trim().toUpperCase();
+
+    try {
+      final response = await _supabase
+          .from('households')
+          .select('id, name, invite_code')
+          .eq('invite_code', trimmedCode)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 8));
+
+      if (response == null) {
+        return const HouseholdJoinResult(success: false, error: 'code');
+      }
+
+      householdId = response['id'] as String;
+      _householdName = response['name'] as String? ?? '';
+      _inviteCode = response['invite_code'] as String? ?? trimmedCode;
+
+      await _prefs?.setString('householdId', householdId!);
+      await _prefs?.setString('householdName', _householdName!);
+      await _prefs?.setString('inviteCode', _inviteCode!);
+
+      _lastReadTimestamp = _prefs?.getString('wg_last_read_$householdId');
+
+      _loadCache();
+
+      final newMember = await addMember(
+        name: memberName,
+        colorIndex: colorIndex,
+        isAdmin: false,
+      );
+
+      if (newMember != null) {
+        currentMemberId = newMember.id;
+        await _prefs?.setString('currentMemberId', newMember.id);
+      }
+
+      version.value++;
+
+      unawaited(_subscribeToRealtime());
+      unawaited(_syncOnline());
+
+      return const HouseholdJoinResult(success: true);
+    } catch (error) {
+      debugPrint('Could not join household: $error');
+
+      return _classifyError(error);
+    }
+  }
+
+  static Future<bool> refreshInviteCode() async {
+    if (householdId == null) {
+      return false;
+    }
+
+    final newCode = _generateInviteCode();
+
+    try {
+      await _supabase
+          .from('households')
+          .update({'invite_code': newCode})
+          .eq('id', householdId!)
+          .timeout(const Duration(seconds: 8));
+
+      _inviteCode = newCode;
+
+      await _prefs?.setString('inviteCode', newCode);
+
+      _notifyAndCache();
+
+      return true;
+    } catch (error) {
+      debugPrint('Could not refresh invite code: $error');
+      return false;
+    }
+  }
+
+  static Future<bool> updateHouseholdName(String name) async {
+    if (householdId == null) {
+      return false;
+    }
+
+    final trimmedName = name.trim();
+
+    if (trimmedName.isEmpty) {
+      return false;
+    }
+
+    try {
+      await _supabase
+          .from('households')
+          .update({'name': trimmedName})
+          .eq('id', householdId!)
+          .timeout(const Duration(seconds: 8));
+
+      _householdName = trimmedName;
+
+      await _prefs?.setString('householdName', trimmedName);
+
+      _notifyAndCache();
+
+      return true;
+    } catch (error) {
+      debugPrint('Could not update household name: $error');
+      return false;
+    }
+  }
+
+  static Future<void> setAdmin(String memberId, bool isAdmin) async {
+    if (householdId == null) return;
+
+    final index = members.indexWhere((member) => member.id == memberId);
+
+    if (index != -1) {
+      final existing = members[index];
+      members[index] = WGMember(
+        id: existing.id,
+        name: existing.name,
+        colorIndex: existing.colorIndex,
+        isAdmin: isAdmin,
+      );
+
+      _notifyAndCache();
+    }
+
+    try {
+      await _supabase
+          .from('members')
+          .update({'is_admin': isAdmin})
+          .eq('id', memberId)
+          .eq('household_id', householdId!);
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+      await _queueOperation('member_update', {
+        'id': memberId,
+        'updates': {'is_admin': isAdmin},
+      });
+    }
+  }
+
+  static Future<void> leaveHousehold() async {
+    householdId = null;
+    currentMemberId = null;
+    _householdName = null;
+    _inviteCode = null;
+    _lastReadTimestamp = null;
+    _unreadMessageCount = 0;
+
+    members.clear();
+    tasks.clear();
+    shoppingItems.clear();
+    chatMessages.clear();
+
+    await _prefs?.remove('householdId');
+    await _prefs?.remove('householdName');
+    await _prefs?.remove('inviteCode');
+    await _prefs?.remove('currentMemberId');
+
+    version.value++;
+  }
+
+  // ============================================================
   // PUBLIC SAVE
   // ============================================================
 
@@ -1808,12 +2957,80 @@ class WGData {
 
     await _saveCache();
 
+    if (householdId != null) {
+      await _prefs?.setString('householdId', householdId!);
+      if (_householdName != null) {
+        await _prefs?.setString('householdName', _householdName!);
+      }
+      if (_inviteCode != null) {
+        await _prefs?.setString('inviteCode', _inviteCode!);
+      }
+    }
+
     if (currentMemberId != null) {
       await _prefs?.setString('currentMemberId', currentMemberId!);
     } else {
       await _prefs?.remove('currentMemberId');
     }
 
+    if (_lastReadTimestamp != null && householdId != null) {
+      await _prefs?.setString('wg_last_read_$householdId', _lastReadTimestamp!);
+    }
+
     version.value++;
   }
+
+  static HouseholdJoinResult _classifyError(Object error) {
+    debugPrint('WGData error details: $error');
+
+    if (error is PostgrestException) {
+      final message = error.message.toLowerCase();
+      final code = error.code;
+
+      if (code == '42P01' ||
+          code == '42703' ||
+          message.contains('invite_code') ||
+          message.contains('column') ||
+          message.contains('relation') ||
+          message.contains('table') ||
+          message.contains('does not exist') ||
+          message.contains('undefined')) {
+        return const HouseholdJoinResult(success: false, error: 'schema');
+      }
+
+      if (code == '42501' ||
+          message.contains('permission') ||
+          message.contains('policy') ||
+          message.contains('denied') ||
+          message.contains('forbidden') ||
+          message.contains('rls') ||
+          message.contains('row-level')) {
+        return const HouseholdJoinResult(success: false, error: 'permission');
+      }
+    }
+
+    final errorStr = error.toString().toLowerCase();
+
+    if (errorStr.contains('socket') ||
+        errorStr.contains('timeout') ||
+        errorStr.contains('network') ||
+        errorStr.contains('connection') ||
+        errorStr.contains('host')) {
+      return const HouseholdJoinResult(success: false, error: 'network');
+    }
+
+    return const HouseholdJoinResult(success: false, error: 'network');
+  }
+}
+
+class HouseholdJoinResult {
+  final bool success;
+  final String? error;
+
+  const HouseholdJoinResult({required this.success, this.error});
+
+  static const network = HouseholdJoinResult(success: false, error: 'network');
+  static const code = HouseholdJoinResult(success: false, error: 'code');
+  static const schema = HouseholdJoinResult(success: false, error: 'schema');
+  static const auth = HouseholdJoinResult(success: false, error: 'auth');
 }

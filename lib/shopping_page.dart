@@ -13,6 +13,26 @@ class _ShoppingPageState extends State<ShoppingPage> {
   final TextEditingController _controller = TextEditingController();
 
   bool _showCompleted = true;
+  VoidCallback? _versionListener;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _versionListener = () {
+      if (mounted) setState(() {});
+    };
+    WGData.version.addListener(_versionListener!);
+  }
+
+  @override
+  void dispose() {
+    if (_versionListener != null) {
+      WGData.version.removeListener(_versionListener!);
+    }
+    _controller.dispose();
+    super.dispose();
+  }
 
   Future<void> _addItem() async {
     final item = _controller.text.trim();
@@ -58,110 +78,26 @@ class _ShoppingPageState extends State<ShoppingPage> {
     return null;
   }
 
-  void _showClaimDialog(Map<String, dynamic> item) {
-    if (WGData.members.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) {
-          return AlertDialog(
-            title: const Text('Keine Bewohner'),
-            content: const Text(
-              'Füge zuerst Bewohner unter "Unsere WG" hinzu.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
+  void _toggleClaim(Map<String, dynamic> item) async {
+    final currentMemberId = WGData.currentMemberId;
 
-      return;
-    }
+    if (currentMemberId == null) return;
 
-    showModalBottomSheet(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Wer kauft das?',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-
-                const SizedBox(height: 12),
-
-                ...WGData.members.map(
-                  (member) => ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: WGData.memberColor(member),
-                      child: Text(
-                        member.name.isNotEmpty
-                            ? member.name[0].toUpperCase()
-                            : '?',
-                      ),
-                    ),
-                    title: Text(member.name),
-                    trailing: item['claimedBy'] == member.id
-                        ? const Icon(Icons.check)
-                        : null,
-                    onTap: () async {
-                      try {
-                        await WGData.updateShoppingItem(
-                          id: item['id'] as String,
-                          claimedBy: member.id,
-                        );
-
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                        }
-
-                        if (mounted) {
-                          setState(() {});
-                        }
-                      } catch (e) {
-                        debugPrint('Could not claim shopping item: $e');
-                      }
-                    },
-                  ),
-                ),
-
-                ListTile(
-                  leading: const Icon(Icons.remove_circle_outline),
-                  title: const Text('Reservierung aufheben'),
-                  onTap: () async {
-                    try {
-                      await WGData.updateShoppingItem(
-                        id: item['id'] as String,
-                        clearClaimedBy: true,
-                      );
-
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                      }
-
-                      if (mounted) {
-                        setState(() {});
-                      }
-                    } catch (e) {
-                      debugPrint('Could not remove shopping claim: $e');
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
+    try {
+      if (item['claimedBy'] == currentMemberId) {
+        await WGData.updateShoppingItem(
+          id: item['id'] as String,
+          claimedBy: null,
         );
-      },
-    );
+      } else {
+        await WGData.updateShoppingItem(
+          id: item['id'] as String,
+          claimedBy: currentMemberId,
+        );
+      }
+    } catch (e) {
+      debugPrint('Could not update shopping item claim: $e');
+    }
   }
 
   Widget _buildShoppingItem(
@@ -173,6 +109,8 @@ class _ShoppingPageState extends State<ShoppingPage> {
     final quantity = item['quantity'] as int;
     final claimedMember = _getClaimedMemberName(item);
     final claimed = claimedMember != null;
+    final currentMemberId = WGData.currentMemberId;
+    final claimedByCurrentUser = item['claimedBy'] == currentMemberId;
 
     final cardColor = completed
         ? Colors.green.withValues(alpha: 0.15)
@@ -297,26 +235,36 @@ class _ShoppingPageState extends State<ShoppingPage> {
 
                   TextButton.icon(
                     onPressed: () {
-                      _showClaimDialog(item);
+                      _toggleClaim(item);
                     },
-                    style: claimed
-                        ? TextButton.styleFrom(foregroundColor: Colors.amber)
+                    style: claimedByCurrentUser
+                        ? TextButton.styleFrom(
+                            foregroundColor: Colors.amber)
                         : null,
                     icon: Icon(
-                      claimed
+                      claimedByCurrentUser
                           ? Icons.lock_outline
-                          : Icons.shopping_bag_outlined,
+                          : claimed
+                              ? Icons.lock_outline
+                              : Icons.shopping_bag_outlined,
                       size: 18,
-                      color: claimed
-                          ? WGData.memberColor(
-                              WGData.members.firstWhere(
-                                (member) => member.id == item['claimedBy'],
-                              ),
-                            )
-                          : null,
+                      color: claimedByCurrentUser
+                          ? Colors.amber
+                          : claimed
+                              ? WGData.memberColor(
+                                  WGData.members.firstWhere(
+                                    (member) =>
+                                        member.id == item['claimedBy'],
+                                  ),
+                                )
+                              : null,
                     ),
                     label: Text(
-                      claimed ? '$claimedMember kauft das' : 'Ich kaufe das',
+                      claimedByCurrentUser
+                          ? 'Nicht mehr reserven'
+                          : claimed
+                              ? '$claimedMember kauft das'
+                              : 'Ich kaufe das',
                     ),
                   ),
                 ],

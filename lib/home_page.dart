@@ -6,6 +6,7 @@ import 'members_page.dart';
 import 'wg_data.dart';
 import 'chat_page.dart';
 import 'settings_page.dart';
+import 'kasse_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -60,7 +61,9 @@ class HomePage extends StatelessWidget {
             .toList();
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Unsere WG')),
+          appBar: AppBar(
+            title: Text(WGData.householdName ?? 'Unsere WG'),
+          ),
           body: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -69,25 +72,35 @@ class HomePage extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    CircleAvatar(
-                      radius: 28,
-                      backgroundColor: currentMember == null
-                          ? Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest
-                          : WGData.memberColor(currentMember),
-                      child: currentMember == null
-                          ? const Icon(Icons.person_outline)
-                          : Text(
-                              currentMember.name.isNotEmpty
-                                  ? currentMember.name[0].toUpperCase()
-                                  : '?',
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                    ),
+                     GestureDetector(
+                       onTap: () {
+                         Navigator.push(
+                           context,
+                           MaterialPageRoute(
+                             builder: (context) => const MembersPage(),
+                           ),
+                         );
+                       },
+                       child: CircleAvatar(
+                         radius: 28,
+                         backgroundColor: currentMember == null
+                             ? Theme.of(context)
+                                   .colorScheme
+                                   .surfaceContainerHighest
+                             : WGData.memberColor(currentMember),
+                         child: currentMember == null
+                             ? const Icon(Icons.person_outline)
+                             : Text(
+                                 currentMember.name.isNotEmpty
+                                     ? currentMember.name[0].toUpperCase()
+                                     : '?',
+                                 style: const TextStyle(
+                                   fontSize: 22,
+                                   fontWeight: FontWeight.bold,
+                                 ),
+                               ),
+                       ),
+                     ),
 
                     const SizedBox(width: 14),
 
@@ -100,8 +113,8 @@ class HomePage extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   currentMember == null
-                                      ? 'Guten Abend'
-                                      : 'Guten Abend ${currentMember.name}',
+                                      ? 'Wilkommen'
+                                      : 'Wilkommen ${currentMember.name}',
                                   style: const TextStyle(
                                     fontSize: 24,
                                     fontWeight: FontWeight.bold,
@@ -132,9 +145,9 @@ class HomePage extends StatelessWidget {
 
                           Text(
                             currentMember == null
-                                ? 'Wer das liest ist gay'
+                                ? 'Kein Profil ausgewählt'
                                 : '${WGData.currentMemberTaskCount} Aufgaben · '
-                                      '${WGData.currentMemberShoppingItemCount} Einkäufe für dich',
+                                    '${WGData.currentMemberShoppingItemCount} Einkäufe für dich',
                             style: TextStyle(
                               fontSize: 14,
                               color: Theme.of(context)
@@ -216,7 +229,7 @@ class HomePage extends StatelessWidget {
 
                                       if (WGData
                                               .currentMemberShoppingItemCount >
-                                          3)
+                                          4)
                                         Text(
                                           '+ ${WGData.currentMemberShoppingItemCount - 3} weitere',
                                           style: TextStyle(
@@ -355,11 +368,99 @@ class HomePage extends StatelessWidget {
                                     final text = message['text'] as String;
                                     final edited = message['edited'] == true;
 
+                                    final unreadCount =
+                                        WGData.unreadMessageCount;
+
+                                    if (unreadCount > 0) {
+                                      return Column(
+                                        children: [
+                                          Text(
+                                            '${sender.name}: $text${edited ? ' · bearbeitet' : ''}',
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '$unreadCount neue Nachricht${unreadCount == 1 ? '' : 'en'}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
+                                      );
+                                    }
+
                                     return Text(
                                       '${sender.name}: $text${edited ? ' · bearbeitet' : ''}',
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       textAlign: TextAlign.center,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                       ),
+
+                      // 💰 WG-Kasse
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const KassePage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.account_balance_wallet,
+                                  size: 48,
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                const Text(
+                                  'WG-Kasse',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+
+                                const SizedBox(height: 6),
+
+                                Builder(
+                                  builder: (context) {
+                                    final total = WGData.totalExpenses;
+
+                                    if (total == 0) {
+                                      return const Text(
+                                        'Keine Ausgaben',
+                                        style: TextStyle(fontSize: 13),
+                                      );
+                                    }
+
+                                    return Text(
+                                      '€${total.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     );
                                   },
                                 ),
@@ -390,8 +491,8 @@ class HomePage extends StatelessWidget {
 
                                 const SizedBox(height: 16),
 
-                                const Text(
-                                  'Unsere WG',
+                                Text(
+                                  WGData.householdName ?? 'Unsere WG',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontSize: 18,

@@ -6,6 +6,21 @@ import 'notifications/notification_preferences.dart';
 class NotificationSettingsPage extends StatelessWidget {
   const NotificationSettingsPage({super.key});
 
+  Future<void> _pickTimeOfDay(BuildContext context) async {
+    final preferences =
+        context.read<NotificationPreferences>();
+    final initialTime = preferences.taskDueTime;
+
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+    );
+
+    if (picked != null) {
+      await preferences.setTaskDueTime(picked);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final preferences = context.watch<NotificationPreferences>();
@@ -41,6 +56,17 @@ class NotificationSettingsPage extends StatelessWidget {
                   value: preferences.taskDueToday,
                   onChanged: preferences.setTaskDueToday,
                 ),
+                const Divider(height: 1),
+                if (preferences.taskDueToday)
+                  ListTile(
+                    leading: const Icon(Icons.access_time_outlined),
+                    title: const Text('Benachrichtigungszeit'),
+                    subtitle: Text(
+                      '${preferences.taskDueTime.hour.toString().padLeft(2, '0')}:${preferences.taskDueTime.minute.toString().padLeft(2, '0')}',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _pickTimeOfDay(context),
+                  ),
               ],
             ),
           ),

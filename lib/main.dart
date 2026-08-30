@@ -1,19 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'wg_data.dart';
-import 'home_page.dart';
 import 'notifications/notification_preferences.dart';
 import 'notifications/notification_service.dart';
+import 'register_page.dart';
+import 'wg_data.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
+  final supabaseFuture = Supabase.initialize(
     url: 'https://xcpbvuzazluqfgrvkgwp.supabase.co',
     publishableKey: 'sb_publishable_u6ytLk4KbPdOulUADY3Fag_qUPfpYYf',
   );
+
+  final notificationPreferences = NotificationPreferences();
+  final prefsFuture = notificationPreferences.initialize();
+
+  await Future.wait([supabaseFuture, prefsFuture]);
 
   try {
     await WGData.initialize();
@@ -22,18 +29,27 @@ Future<void> main() async {
     debugPrintStack(stackTrace: stackTrace);
   }
 
-  final notificationPreferences = NotificationPreferences();
-  await notificationPreferences.initialize();
-
-  await NotificationService.instance.syncTaskNotifications(
-    WGData.tasks,
-    notificationPreferences,
-  );
+  WGData.setNotificationPreferences(notificationPreferences);
 
   runApp(
     ChangeNotifierProvider.value(
       value: notificationPreferences,
       child: const MyApp(),
+    ),
+  );
+
+  unawaited(
+    NotificationService.instance.syncTaskNotifications(
+      WGData.tasks,
+      notificationPreferences,
+    ),
+  );
+
+  unawaited(
+    NotificationService.instance.triggerDueTodayNotifications(
+      tasks: WGData.tasks,
+      currentMemberId: WGData.currentMemberId,
+      preferences: notificationPreferences,
     ),
   );
 }
@@ -43,9 +59,34 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = context.watch<NotificationPreferences>().isDarkMode;
+
     return MaterialApp(
       title: 'WG',
       theme: ThemeData(
+        brightness: Brightness.light,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: Colors.white,
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.grey[100],
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+      darkTheme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.teal,
@@ -68,7 +109,9 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const HomePage(),
+      themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      navigatorKey: WGData.navigatorKey,
+      home: const GatePage(),
     );
   }
 }

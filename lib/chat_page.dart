@@ -20,6 +20,7 @@ class _ChatPageState extends State<ChatPage> {
   Map<String, dynamic>? _replyingTo;
   String? _highlightedMessageId;
   Timer? _highlightTimer;
+  VoidCallback? _versionListener;
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
@@ -344,7 +345,19 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
 
+    _versionListener = () {
+      if (!mounted) return;
+
+      final lastMessage = WGData.latestChatMessage;
+      if (lastMessage != null) {
+        setState(() {});
+      }
+    };
+    WGData.version.addListener(_versionListener!);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      WGData.markMessagesRead();
+
       if (!mounted || !_scrollController.hasClients) {
         return;
       }
@@ -355,6 +368,9 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    if (_versionListener != null) {
+      WGData.version.removeListener(_versionListener!);
+    }
     _highlightTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();

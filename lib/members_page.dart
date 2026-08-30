@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'wg_data.dart';
 
@@ -12,6 +11,18 @@ class MembersPage extends StatefulWidget {
 
 class _MembersPageState extends State<MembersPage> {
   final TextEditingController _controller = TextEditingController();
+
+  VoidCallback? _versionListener;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _versionListener = () {
+      if (mounted) setState(() {});
+    };
+    WGData.version.addListener(_versionListener!);
+  }
 
   void _showCurrentUserDialog() {
     if (WGData.members.isEmpty) {
@@ -92,7 +103,7 @@ class _MembersPageState extends State<MembersPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Choose your color'),
+              title: const Text('Farbe auswählen'),
               content: Wrap(
                 spacing: 12,
                 runSpacing: 12,
@@ -121,13 +132,13 @@ class _MembersPageState extends State<MembersPage> {
                   onPressed: () {
                     Navigator.pop(context);
                   },
-                  child: const Text('Cancel'),
+                  child: const Text('Abbrechen'),
                 ),
                 FilledButton(
                   onPressed: () {
                     Navigator.pop(context, selectedColorIndex);
                   },
-                  child: const Text('Add'),
+                  child: const Text('Hinzufügen'),
                 ),
               ],
             );
@@ -209,52 +220,20 @@ class _MembersPageState extends State<MembersPage> {
       debugPrint('Failed to update member: $e');
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update member.')),
-        );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Bewohner konnte nicht aktualisiert werden')),
+          );
       }
     }
-
-    await WGData.save();
   }
 
   Future<void> _deleteMember(WGMember member) async {
     try {
-      // Delete the member from Supabase first.
-      await Supabase.instance.client
-          .from('members')
-          .delete()
-          .eq('id', member.id);
+      await WGData.deleteMember(member.id);
 
-      // Update local state after Supabase succeeds.
-      setState(() {
-        WGData.members.removeWhere(
-          (existingMember) => existingMember.id == member.id,
-        );
-
-        if (WGData.currentMemberId == member.id) {
-          WGData.currentMemberId = null;
-        }
-
-        for (final task in WGData.tasks) {
-          if (task['assignedTo'] == member.id) {
-            task['assignedTo'] = null;
-          }
-        }
-
-        for (final item in WGData.shoppingItems) {
-          if (item['claimedBy'] == member.id) {
-            item['claimedBy'] = null;
-          }
-        }
-
-        WGData.chatMessages.removeWhere(
-          (message) => message['senderId'] == member.id,
-        );
-      });
-
-      // Keep local storage in sync too.
-      await WGData.save();
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
       debugPrint('Could not delete member: $e');
 
@@ -264,12 +243,59 @@ class _MembersPageState extends State<MembersPage> {
 
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Could not delete member')));
+      ).showSnackBar(const SnackBar(content: Text('Bewohner konnte nicht gelöscht werden')));
     }
+  }
+
+  void _showFlatshareManagementDialog(BuildContext context) {
+    final nameController =
+        TextEditingController(text: WGData.householdName ?? 'Unsere WG');
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Name der WG'),
+          content: TextField(
+            controller: nameController,
+            decoration: const InputDecoration(
+              labelText: 'Name',
+              border: OutlineInputBorder(),
+            ),
+            textCapitalization: TextCapitalization.words,
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+
+                if (name.isNotEmpty) {
+                  await WGData.updateHouseholdName(name);
+                }
+
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+              },
+              child: const Text('Speichern'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = WGData.isAdmin;
+    final householdName = WGData.householdName;
+    final inviteCode = WGData.inviteCode;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Unsere WG')),
       body: Padding(
@@ -293,6 +319,83 @@ class _MembersPageState extends State<MembersPage> {
               ),
             ),
 
+            if (householdName != null || inviteCode != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: Column(
+                  children: [
+                    if (householdName != null)
+                      ListTile(
+                        leading: const Icon(Icons.home_work_outlined),
+                        title: const Text('Name der WG'),
+                        subtitle: Text(householdName),
+                        trailing: isAdmin
+                            ? const Icon(Icons.edit_outlined, size: 18)
+                            : null,
+                        onTap: isAdmin
+                            ? () => _showFlatshareManagementDialog(context)
+                            : null,
+                      ),
+                    if (householdName != null) const Divider(height: 1),
+                    if (inviteCode != null)
+                      ListTile(
+                        leading: const Icon(Icons.qr_code_outlined),
+                        title: const Text('Einladungscode'),
+                        subtitle: SelectableText(
+                          inviteCode,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                        trailing: isAdmin
+                            ? IconButton(
+                                icon: const Icon(Icons.refresh),
+                                tooltip: 'Neu generieren',
+                                onPressed: () async {
+                                  final success =
+                                      await WGData.refreshInviteCode();
+
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          success
+                                              ? 'Neuer Einladungscode generiert'
+                                              : 'Konnte keinen neuen '
+                                                  'Einladungscode generieren',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              )
+                            : null,
+                      ),
+                    if (inviteCode != null && isAdmin) ...[
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.share_outlined),
+                        title: const Text('Einladen'),
+                        onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: SelectableText(
+                                'Teile diesen Einladungscode '
+                                'mit deinen Mitbewohnern: '
+                                '$inviteCode',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 16),
 
             TextField(
@@ -314,7 +417,9 @@ class _MembersPageState extends State<MembersPage> {
                       child: Text(
                         'Noch keine Bewohner hinzugefügt',
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
                         ),
                       ),
                     )
@@ -328,17 +433,50 @@ class _MembersPageState extends State<MembersPage> {
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor: WGData.memberColor(member),
-                              child: Text(
-                                member.name.isNotEmpty
-                                    ? member.name[0].toUpperCase()
-                                    : '?',
-                              ),
+                              child: member.isAdmin
+                                  ? const Icon(Icons.star, size: 20)
+                                  : Text(
+                                      member.name.isNotEmpty
+                                          ? member.name[0].toUpperCase()
+                                          : '?',
+                                    ),
                             ),
-                            title: Text(member.name),
-                            subtitle: WGData.currentMemberId == member.id
-                                ? const Text('Du')
-                                : null,
-                            trailing: const Icon(Icons.chevron_right),
+                            title: Row(
+                              children: [
+                                Text(member.name),
+                                if (member.isAdmin) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.star,
+                                      size: 16, color: Colors.yellow),
+                                ],
+                              ],
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (WGData.currentMemberId == member.id)
+                                  const Text('Du'),
+                                if (isAdmin &&
+                                    member.id !=
+                                        WGData.currentMemberId)
+                                  Text(
+                                    member.isAdmin
+                                        ? 'Administrator'
+                                        : 'Kein Administrator',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: member.isAdmin
+                                          ? Colors.yellow.shade700
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            trailing: isAdmin
+                                ? _buildAdminActions(context, member)
+                                : const Icon(Icons.chevron_right),
                             onTap: () {
                               _showEditMemberDialog(member);
                             },
@@ -353,8 +491,36 @@ class _MembersPageState extends State<MembersPage> {
     );
   }
 
+  Widget _buildAdminActions(BuildContext context, WGMember member) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: Icon(
+            member.isAdmin
+                ? Icons.star
+                : Icons.star_border,
+            color: member.isAdmin ? Colors.yellow.shade700 : null,
+            size: 20,
+          ),
+          tooltip: member.isAdmin
+              ? 'Administrator entfernen'
+              : 'Zur Administrator machen',
+          onPressed: () async {
+            await WGData.setAdmin(member.id, !member.isAdmin);
+          },
+        ),
+        const SizedBox(width: 4),
+        const Icon(Icons.chevron_right, size: 18),
+      ],
+    );
+  }
+
   @override
   void dispose() {
+    if (_versionListener != null) {
+      WGData.version.removeListener(_versionListener!);
+    }
     _controller.dispose();
     super.dispose();
   }
@@ -443,15 +609,18 @@ class _EditMemberDialogState extends State<_EditMemberDialog> {
 
             const Divider(),
 
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text(
-                'Bewohner löschen',
-                style: TextStyle(color: Colors.red),
+            if (WGData.isAdmin &&
+                widget.member.id != WGData.currentMemberId)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading:
+                    const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text(
+                  'Bewohner löschen',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: _requestDelete,
               ),
-              onTap: _requestDelete,
-            ),
           ],
         ),
       ),

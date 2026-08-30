@@ -15,10 +15,17 @@ class _TaskPageState extends State<TaskPage> {
   final TextEditingController _controller = TextEditingController();
   final NotificationPreferences _notificationPreferences =
       NotificationPreferences();
+  VoidCallback? _versionListener;
+
   @override
   void initState() {
     super.initState();
     _notificationPreferences.initialize();
+
+    _versionListener = () {
+      if (mounted) setState(() {});
+    };
+    WGData.version.addListener(_versionListener!);
   }
 
   Future<void> _addTask() async {
@@ -127,7 +134,7 @@ class _TaskPageState extends State<TaskPage> {
       return 'Keine Frist';
     }
 
-    final date = DateTime.tryParse(value as String);
+    final date = DateTime.tryParse(value.toString());
 
     if (date == null) {
       return 'Keine Frist';
@@ -165,7 +172,7 @@ class _TaskPageState extends State<TaskPage> {
       return Theme.of(context).colorScheme.onSurfaceVariant;
     }
 
-    final date = DateTime.tryParse(value as String);
+    final date = DateTime.tryParse(value.toString());
 
     if (date == null) {
       return Theme.of(context).colorScheme.onSurfaceVariant;
@@ -198,7 +205,7 @@ class _TaskPageState extends State<TaskPage> {
     final now = DateTime.now();
 
     final currentDate = task['dueDate'] != null
-        ? DateTime.tryParse(task['dueDate'] as String)
+        ? DateTime.tryParse(task['dueDate'].toString())
         : null;
 
     final pickedDate = await showDatePicker(
@@ -548,6 +555,9 @@ class _TaskPageState extends State<TaskPage> {
 
   @override
   void dispose() {
+    if (_versionListener != null) {
+      WGData.version.removeListener(_versionListener!);
+    }
     _controller.dispose();
     super.dispose();
   }
@@ -598,14 +608,6 @@ class _TaskPageState extends State<TaskPage> {
                       itemCount: WGData.tasks.length,
 
                       onReorderItem: (oldIndex, newIndex) async {
-                        onReorderItem:
-                        (oldIndex, newIndex) async {
-                          final task = WGData.tasks.removeAt(oldIndex);
-
-                          WGData.tasks.insert(newIndex, task);
-
-                          await WGData.updateTaskOrder();
-                        };
                         final task = WGData.tasks.removeAt(oldIndex);
 
                         WGData.tasks.insert(newIndex, task);
@@ -873,6 +875,11 @@ class _TaskPageState extends State<TaskPage> {
                                     );
 
                                     try {
+                                      await NotificationService.instance
+                                          .cancelTaskNotification(
+                                            task['id'].toString(),
+                                          );
+
                                       await WGData.deleteTask(task['id']);
 
                                       if (mounted) {
