@@ -9,17 +9,20 @@ class UpdateAlertDialog extends StatelessWidget {
     required this.currentVersion,
     required this.latestVersion,
     required this.releaseUrl,
+    required this.apkUrl,
   });
 
   final String currentVersion;
   final String latestVersion;
   final String? releaseUrl;
+  final String? apkUrl;
 
   static Future<void> show({
     required BuildContext context,
     required String currentVersion,
     required String latestVersion,
     required String? releaseUrl,
+    required String? apkUrl,
   }) {
     return showDialog(
       context: context,
@@ -28,12 +31,92 @@ class UpdateAlertDialog extends StatelessWidget {
         currentVersion: currentVersion,
         latestVersion: latestVersion,
         releaseUrl: releaseUrl,
+        apkUrl: apkUrl,
       ),
-    ).then((_) async {
-      if (context.mounted && releaseUrl != null) {
-        await VersionCheckService.openReleaseUrl(releaseUrl);
-      }
-    });
+    );
+  }
+
+  static Future<void> showDownloadProgress({
+    required BuildContext context,
+    required String apkUrl,
+    required String releaseUrl,
+  }) async {
+    final progress = ValueNotifier<double>(0.0);
+    final status = ValueNotifier<String>('Vorbereite...');
+
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          title: const Text('Update wird heruntergeladen'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ValueListenableBuilder(
+                valueListenable: progress,
+                builder: (context, value, child) => LinearProgressIndicator(
+                  value: value,
+                  minHeight: 8,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ValueListenableBuilder(
+                valueListenable: status,
+                builder: (context, value, child) => Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final success = await VersionCheckService.downloadAndInstallApk(
+      apkUrl: apkUrl,
+      releaseUrl: releaseUrl,
+      onProgress: (p, s) {
+        progress.value = p;
+        if (s != null) status.value = s;
+      },
+    );
+
+    progress.dispose();
+    status.dispose();
+
+    if (context.mounted) {
+      Navigator.of(context).pop();
+    }
+
+    if (!context.mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Der Download ist fehlgeschlagen.'),
+          action: SnackBarAction(
+            label: 'Manuell öffnen',
+            onPressed: () {
+              VersionCheckService.openReleaseUrl(releaseUrl);
+            },
+          ),
+        ),
+      );
+
+      await VersionCheckService.openReleaseUrl(releaseUrl);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Update wird installiert...'),
+        ),
+      );
+    }
   }
 
   Future<void> _copyUrl(BuildContext context) async {
@@ -99,7 +182,8 @@ class UpdateAlertDialog extends StatelessWidget {
           ],
           const Text(
             'Es ist ein neues Update verfügbar. '
-            'Bitte aktualisiere die App für die neuesten Funktionen.',
+            'Tippe auf "Jetzt aktualisieren", um die neue Version '
+            'automatisch herunterzuladen und zu installieren.',
             style: TextStyle(fontSize: 12),
           ),
         ],
@@ -110,14 +194,28 @@ class UpdateAlertDialog extends StatelessWidget {
           child: const Text('Später'),
         ),
         FilledButton(
-          onPressed: () async {
-            Navigator.of(context).pop();
+          onPressed: apkUrl != null
+              ? () async {
+                  Navigator.of(context).pop();
 
-            if (releaseUrl != null) {
-              await VersionCheckService.openReleaseUrl(releaseUrl!);
-            }
-          },
-          child: const Text('Jetzt aktualisieren'),
+                  if (context.mounted && apkUrl != null) {
+                    await showDownloadProgress(
+                      context: context,
+                      apkUrl: apkUrl!,
+                      releaseUrl: releaseUrl ?? '',
+                    );
+                  }
+                }
+              : () async {
+                  Navigator.of(context).pop();
+
+                  if (releaseUrl != null) {
+                    await VersionCheckService.openReleaseUrl(releaseUrl!);
+                  }
+                },
+          child: Text(
+            apkUrl != null ? 'Jetzt aktualisieren' : 'Jetzt aktualisieren',
+          ),
         ),
       ],
     );
