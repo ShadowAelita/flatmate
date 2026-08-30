@@ -228,7 +228,7 @@ class WGData {
       case 'task':
         for (final task in tasks) {
           if (task['id']?.toString() == referenceId) {
-            return task['title']?.toString() ?? task['text']?.toString();
+            return task['name']?.toString() ?? task['title']?.toString() ?? task['text']?.toString();
           }
         }
 

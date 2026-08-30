@@ -634,10 +634,11 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                           ...WGData.tasks.map((task) {
                             final taskId = task['id']?.toString() ?? '';
-                            final taskTitle =
-                                task['title']?.toString() ??
-                                task['text']?.toString() ??
-                                'Unbekannt';
+              final taskTitle =
+                                  task['name']?.toString() ??
+                                  task['title']?.toString() ??
+                                  task['text']?.toString() ??
+                                  'Unbekannt';
                             final isSelected = selectedId == taskId;
 
                             return ListTile(
