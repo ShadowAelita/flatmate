@@ -1737,14 +1737,10 @@ class WGData {
           .eq('household_id', householdId!)
           .order('created_at', ascending: false);
 
-      final hasPendingExpenseInserts = _pendingOperations.any(
-        (op) => op['type']?.toString() == 'expense_insert',
-      );
-
-      if (response.isEmpty && hasPendingExpenseInserts) {
+      if (response.isEmpty && expenses.isNotEmpty) {
         debugPrint(
-          'Expenses: keeping local data '
-          '(server empty but pending inserts exist).',
+          'Expenses: preserving local data '
+          '(server returned empty, local cache has ${expenses.length} entries).',
         );
 
         return;
@@ -1769,6 +1765,15 @@ class WGData {
           .select('name')
           .eq('household_id', householdId!)
           .order('name');
+
+       if (response.isEmpty && expenseCategories.isNotEmpty) {
+        debugPrint(
+          'Expense categories: preserving local data '
+          '(server returned empty, local cache has entries).',
+        );
+
+        return;
+      }
 
       expenseCategories.clear();
 
