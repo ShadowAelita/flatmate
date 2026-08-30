@@ -1,0 +1,52 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Create certificate
+        id: certificate
+        uses: apple-actions/certificate@v4
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Create provisioning profile
+        id: profile
+        uses: apple-actions/provisioning-profile@v1
+        with:
+          app-identifier: com.example.flatmate
+          device-udid: ${{ secrets.DEVICE_UDID }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build iOS IPA
+        run: |
+          flutter build ipa \
+            --release \
+            --build-number=${{ github.run_number }}
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatmate-ios-${{ github.run_number }}
+          path: build/ios/ipa/*.ipa
+          retention-days: 14
