@@ -87,7 +87,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
       if (item['claimedBy'] == currentMemberId) {
         await WGData.updateShoppingItem(
           id: item['id'] as String,
-          claimedBy: null,
+          clearClaimedBy: true,
         );
       } else {
         await WGData.updateShoppingItem(

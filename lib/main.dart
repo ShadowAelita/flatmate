@@ -44,14 +44,6 @@ Future<void> main() async {
       notificationPreferences,
     ),
   );
-
-  unawaited(
-    NotificationService.instance.triggerDueTodayNotifications(
-      tasks: WGData.tasks,
-      currentMemberId: WGData.currentMemberId,
-      preferences: notificationPreferences,
-    ),
-  );
 }
 
 class MyApp extends StatelessWidget {

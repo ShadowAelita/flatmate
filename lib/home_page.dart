@@ -446,20 +446,23 @@ class HomePage extends StatelessWidget {
 
                                 Builder(
                                   builder: (context) {
-                                    final total = WGData.totalExpenses;
+                                    final balance = WGData.currentMemberBalance;
 
-                                    if (total == 0) {
+                                    if (balance == 0) {
                                       return const Text(
-                                        'Keine Ausgaben',
+                                        'Ausgeglichen',
                                         style: TextStyle(fontSize: 13),
                                       );
                                     }
 
                                     return Text(
-                                      '€${total.toStringAsFixed(2)}',
-                                      style: const TextStyle(
+                                      '${balance > 0 ? "+" : ""}€${balance.abs().toStringAsFixed(2)}',
+                                      style: TextStyle(
                                         fontSize: 16,
-                                        fontWeight: FontWeight.bold,
+                                        fontWeight: FontWeight.w600,
+                                        color: balance > 0
+                                            ? Colors.green
+                                            : Colors.red,
                                       ),
                                     );
                                   },
