@@ -26,13 +26,121 @@ class _ChatPageState extends State<ChatPage> {
   Timer? _highlightTimer;
   VoidCallback? _versionListener;
 
+  List<WGMember> _mentionSuggestions = [];
+  bool _showMentions = false;
+
+  void _onTextChanged() {
+    final text = _controller.text;
+    final atIndex = text.lastIndexOf('@');
+
+    if (atIndex == -1 || atIndex == text.length - 1) {
+      if (atIndex == -1 && _showMentions) {
+        setState(() => _showMentions = false);
+      }
+
+      return;
+    }
+
+    final afterAt = text.substring(atIndex + 1);
+    final spaceAfterAt = afterAt.indexOf(' ');
+
+    if (atIndex > 0 && text[atIndex - 1] == ' ') {
+      final query = spaceAfterAt == -1
+          ? afterAt
+          : afterAt.substring(0, spaceAfterAt);
+
+      if (query.isEmpty) {
+        setState(() {
+          _mentionSuggestions = List.from(WGData.members);
+          _showMentions = true;
+        });
+      } else {
+        setState(() {
+          _mentionSuggestions = WGData.members
+              .where((m) =>
+                  m.name.toLowerCase().contains(query.toLowerCase()))
+              .toList();
+          _showMentions = _mentionSuggestions.isNotEmpty;
+        });
+      }
+    }
+  }
+
+  void _insertMention(WGMember member) {
+    final text = _controller.text;
+    final atIndex = text.lastIndexOf('@');
+
+    if (atIndex == -1) return;
+
+    final afterAt = atIndex < text.length - 1 ? text.substring(atIndex + 1) : '';
+    final spaceAfterAt = afterAt.indexOf(' ');
+    final queryEnd = spaceAfterAt == -1 ? text.length : atIndex + 1 + spaceAfterAt;
+
+    final newText = '${text.substring(0, atIndex)}@${member.name} ${text.substring(queryEnd)}';
+
+    _controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: atIndex + member.name.length + 2),
+    );
+
+    setState(() {
+      _showMentions = false;
+      _mentionSuggestions = [];
+    });
+  }
+
+  List<InlineSpan> _buildMentionSpan(String text) {
+    final spans = <TextSpan>[];
+    final regex = RegExp(r'@(\w+)');
+    final matches = regex.allMatches(text);
+
+    var lastIndex = 0;
+
+    for (final match in matches) {
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(text: text.substring(lastIndex, match.start)));
+      }
+
+      final memberName = match.group(1) ?? '';
+
+      final member = WGData.members.firstWhere(
+        (m) => m.name.toLowerCase() == memberName.toLowerCase(),
+        orElse: () => WGMember(id: '', name: '', colorIndex: 0),
+      );
+
+      final color = member.id.isEmpty
+          ? Colors.blue
+          : WGData.memberColor(member);
+
+      spans.add(TextSpan(
+        text: '@$memberName',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ));
+
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      spans.add(TextSpan(text: text.substring(lastIndex)));
+    }
+
+    if (spans.isEmpty) {
+      spans.add(const TextSpan(text: ''));
+    }
+
+    return spans;
+  }
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     final member = WGData.currentMember;
 
-     if ((text.isEmpty && _referenceId == null) || member == null) {
-       return;
-     }
+    if ((text.isEmpty && _referenceId == null) || member == null) {
+      return;
+    }
 
     final replyToId = _replyingTo?['id']?.toString();
 
@@ -362,6 +470,7 @@ class _ChatPageState extends State<ChatPage> {
       }
     };
     WGData.version.addListener(_versionListener!);
+    _controller.addListener(_onTextChanged);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WGData.markMessagesRead();
@@ -380,6 +489,7 @@ class _ChatPageState extends State<ChatPage> {
       WGData.version.removeListener(_versionListener!);
     }
     _highlightTimer?.cancel();
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -962,10 +1072,14 @@ class _ChatPageState extends State<ChatPage> {
 
                                   if (message['text']?.toString().isNotEmpty ??
                                       false)
-                                    Text(
-                                    message['text']?.toString() ?? '',
-                                    style: const TextStyle(fontSize: 16),
-                                  ),
+                                    RichText(
+                                      text: TextSpan(
+                                        style: const TextStyle(fontSize: 16),
+                                        children: _buildMentionSpan(
+                                          message['text']?.toString() ?? '',
+                                        ),
+                                      ),
+                                    ),
 
                                   const SizedBox(height: 4),
 
@@ -1065,6 +1179,40 @@ class _ChatPageState extends State<ChatPage> {
                       ],
                     ),
                   ),
+
+                  if (_showMentions && _mentionSuggestions.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 12),
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outline,
+                          width: 0.5,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _mentionSuggestions.length,
+                        itemBuilder: (context, index) {
+                          final member = _mentionSuggestions[index];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: WGData.memberColor(member),
+                              child: Text(
+                                member.name.isNotEmpty
+                                    ? member.name[0].toUpperCase()
+                                    : '?',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            title: Text(member.name),
+                            onTap: () => _insertMention(member),
+                          );
+                        },
+                      ),
+                    ),
                 ],
               ),
             ),

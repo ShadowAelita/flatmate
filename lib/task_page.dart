@@ -17,6 +17,11 @@ class _TaskPageState extends State<TaskPage> {
       NotificationPreferences();
   VoidCallback? _versionListener;
 
+  DateTime _calendarFocusedMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  DateTime? _selectedDay;
+
+  static final List<String> _weekdayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+
   @override
   void initState() {
     super.initState();
@@ -310,6 +315,61 @@ class _TaskPageState extends State<TaskPage> {
                   Navigator.pop(context, 'monthly');
                 },
               ),
+
+              ListTile(
+                leading: const Icon(Icons.numbers_outlined),
+                title: const Text('Individuell'),
+                subtitle: currentRepeat.startsWith('custom')
+                    ? Text(
+                        'Alle ${currentRepeat.split(':')[1]} Tage',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                     )
+                    : null,
+                trailing: currentRepeat.startsWith('custom')
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () {
+                  final controller = TextEditingController();
+
+                  showDialog(
+                    context: context,
+                    builder: (dialogContext) {
+                      return AlertDialog(
+                        title: const Text('Wiederholung'),
+                        content: TextField(
+                          controller: controller,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Tage',
+                            hintText: 'z. B. 3',
+                          ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext),
+                            child: const Text('Abbrechen'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              final days = int.tryParse(controller.text);
+
+                              if (days != null && days > 0) {
+                                Navigator.pop(dialogContext, days);
+                              }
+                            },
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      );
+                    },
+                  ).then((value) {
+                    if (value != null && value > 0) {
+                      Navigator.pop(context, 'custom:$value');
+                    }
+                  });
+                },
+              ),
             ],
           ),
         );
@@ -367,6 +427,18 @@ class _TaskPageState extends State<TaskPage> {
         return DateTime(nextMonth.year, nextMonth.month, day);
 
       default:
+        if (repeat.startsWith('custom:')) {
+          final parts = repeat.split(':');
+
+          if (parts.length == 2) {
+            final days = int.tryParse(parts[1]);
+
+            if (days != null && days > 0) {
+              return currentDate.add(Duration(days: days));
+            }
+          }
+        }
+
         return null;
     }
   }
@@ -564,128 +636,159 @@ class _TaskPageState extends State<TaskPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Aufgaben'),
-        actions: [
-          IconButton(
-            onPressed: _sortTasksByDueDate,
-            icon: const Icon(Icons.sort),
-            tooltip: 'Nach Frist sortieren',
-          ),
-        ],
-      ),
-
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextField(
-              controller: _controller,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Was muss erledigt werden?',
-                hintText: 'z. B. Küche putzen',
-                prefixIcon: Icon(Icons.check_circle_outline),
-              ),
-              onSubmitted: (_) => _addTask(),
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Aufgaben'),
+          actions: [
+            IconButton(
+              onPressed: _sortTasksByDueDate,
+              icon: const Icon(Icons.sort),
+              tooltip: 'Nach Frist sortieren',
             ),
+          ],
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Liste'),
+              Tab(text: 'Kalender'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            _buildTaskList(),
+            _buildCalendarView(),
+          ],
+        ),
+      ),
+    );
+  }
 
-            const SizedBox(height: 16),
+  Widget _buildTaskList() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          TextField(
+            controller: _controller,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              labelText: 'Was muss erledigt werden?',
+              hintText: 'z. B. Küche putzen',
+              prefixIcon: Icon(Icons.check_circle_outline),
+            ),
+            onSubmitted: (_) => _addTask(),
+          ),
 
-            Expanded(
-              child: WGData.tasks.isEmpty
-                  ? Center(
-                      child: Text(
-                        'Keine offenen Aufgaben',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+          const SizedBox(height: 16),
+
+          Expanded(
+            child: WGData.tasks.isEmpty
+                ? Center(
+                    child: Text(
+                      'Keine offenen Aufgaben',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
-                    )
-                  : ReorderableListView.builder(
-                      itemCount: WGData.tasks.length,
+                    ),
+                  )
+                : ReorderableListView.builder(
+                    itemCount: WGData.tasks.length,
+                    onReorderItem: (oldIndex, newIndex) async {
+                      final task = WGData.tasks.removeAt(oldIndex);
 
-                      onReorderItem: (oldIndex, newIndex) async {
-                        final task = WGData.tasks.removeAt(oldIndex);
+                      WGData.tasks.insert(newIndex, task);
 
-                        WGData.tasks.insert(newIndex, task);
+                      await WGData.updateTaskOrder();
+                    },
+                    itemBuilder: (context, index) {
+                      final task = WGData.tasks[index];
 
-                        await WGData.updateTaskOrder();
-                      },
+                      final completed = task['completed'] as bool;
 
-                      itemBuilder: (context, index) {
-                        final task = WGData.tasks[index];
+                      final assignedMember = _getAssignedMember(task);
 
-                        final completed = task['completed'] as bool;
+                      final cardColor = completed
+                          ? Colors.green.withValues(alpha: 0.15)
+                          : null;
 
-                        final assignedMember = _getAssignedMember(task);
+                      return Card(
+                        key: ValueKey(task['id']),
+                        color: cardColor,
+                        margin: const EdgeInsets.only(bottom: 12),
 
-                        final cardColor = completed
-                            ? Colors.green.withValues(alpha: 0.15)
-                            : null;
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
 
-                        return Card(
-                          key: ValueKey(task['id']),
-                          color: cardColor,
-                          margin: const EdgeInsets.only(bottom: 12),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: completed,
+                                onChanged: (value) async {
+                                  await _completeTask(task, value ?? false);
+                                },
+                              ),
 
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 8,
-                            ),
-
-                            child: Row(
-                              children: [
-                                Checkbox(
-                                  value: completed,
-                                  onChanged: (value) async {
-                                    await _completeTask(task, value ?? false);
-                                  },
-                                ),
-
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        task['name'],
-                                        style: TextStyle(
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.w600,
-                                          decoration: completed
-                                              ? TextDecoration.lineThrough
-                                              : TextDecoration.none,
-                                          color: completed
-                                              ? Theme.of(context)
-                                                    .colorScheme
-                                                    .onSurfaceVariant
-                                              : null,
-                                        ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      task['name'],
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w600,
+                                        decoration: completed
+                                            ? TextDecoration.lineThrough
+                                            : TextDecoration.none,
+                                        color: completed
+                                            ? Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant
+                                            : null,
                                       ),
+                                    ),
 
-                                      const SizedBox(height: 4),
+                                    const SizedBox(height: 4),
 
-                                      // Assignment
-                                      InkWell(
-                                        borderRadius: BorderRadius.circular(8),
-                                        onTap: () =>
-                                            _showAssignmentDialog(task),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 4,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                assignedMember == null
-                                                    ? Icons.person_outline
-                                                    : Icons.person,
-                                                size: 18,
+                                    // Assignment
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(8),
+                                      onTap: () =>
+                                          _showAssignmentDialog(task),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 4,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              assignedMember == null
+                                                  ? Icons.person_outline
+                                                  : Icons.person,
+                                              size: 18,
+                                              color: assignedMember == null
+                                                  ? Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant
+                                                  : WGData.memberColor(
+                                                      assignedMember,
+                                                    ),
+                                            ),
+
+                                            const SizedBox(width: 6),
+
+                                            Text(
+                                              assignedMember?.name ??
+                                                  'Nicht zugewiesen',
+                                              style: TextStyle(
                                                 color: assignedMember == null
                                                     ? Theme.of(context)
                                                           .colorScheme
@@ -694,224 +797,536 @@ class _TaskPageState extends State<TaskPage> {
                                                         assignedMember,
                                                       ),
                                               ),
-
-                                              const SizedBox(width: 6),
-
-                                              Text(
-                                                assignedMember?.name ??
-                                                    'Nicht zugewiesen',
-                                                style: TextStyle(
-                                                  color: assignedMember == null
-                                                      ? Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurfaceVariant
-                                                      : WGData.memberColor(
-                                                          assignedMember,
-                                                        ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
                                       ),
+                                    ),
 
-                                      // Due date
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          InkWell(
-                                            borderRadius: BorderRadius.circular(
-                                              8,
+                                    // Due date
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        InkWell(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          onTap: () => _pickDueDate(task),
+                                          child: Padding(
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                              vertical: 4,
                                             ),
-                                            onTap: () => _pickDueDate(task),
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    vertical: 4,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons
+                                                      .calendar_today_outlined,
+                                                  size: 18,
+                                                  color: _dueDateColor(
+                                                    context,
+                                                    task['dueDate'],
                                                   ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons
-                                                        .calendar_today_outlined,
-                                                    size: 18,
+                                                ),
+
+                                                const SizedBox(width: 6),
+
+                                                Text(
+                                                  _formatDueDate(
+                                                    task['dueDate'],
+                                                  ),
+                                                  style: TextStyle(
                                                     color: _dueDateColor(
                                                       context,
                                                       task['dueDate'],
                                                     ),
                                                   ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
 
-                                                  const SizedBox(width: 6),
+                                        if (task['dueDate'] != null)
+                                          IconButton(
+                                            onPressed: () async {
+                                              try {
+                                                await WGData.updateTask(
+                                                  id: task['id'],
+                                                  dueDate: null,
+                                                  updateDueDate: true,
+                                                );
+                                                await NotificationService
+                                                    .instance
+                                                    .cancelTaskNotification(
+                                                      task['id'].toString(),
+                                                    );
 
-                                                  Text(
-                                                    _formatDueDate(
-                                                      task['dueDate'],
-                                                    ),
-                                                    style: TextStyle(
-                                                      color: _dueDateColor(
-                                                        context,
-                                                        task['dueDate'],
-                                                      ),
+                                                if (mounted) {
+                                                  setState(() {});
+                                                }
+                                              } catch (e) {
+                                                debugPrint(
+                                                  'Could not remove task due date: $e',
+                                                );
+
+                                                if (!context.mounted) {
+                                                  return;
+                                                }
+
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                      'Frist konnte nicht entfernt werden',
                                                     ),
                                                   ),
-                                                ],
-                                              ),
+                                                );
+                                              }
+                                            },
+                                            icon: const Icon(Icons.close),
+                                            iconSize: 18,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 32,
+                                              minHeight: 32,
                                             ),
+                                            tooltip: 'Frist entfernen',
                                           ),
+                                      ],
+                                    ),
 
-                                          if (task['dueDate'] != null)
-                                            IconButton(
-                                              onPressed: () async {
-                                                try {
-                                                  await WGData.updateTask(
-                                                    id: task['id'],
-                                                    dueDate: null,
-                                                    updateDueDate: true,
-                                                  );
-                                                  await NotificationService
-                                                      .instance
-                                                      .cancelTaskNotification(
-                                                        task['id'].toString(),
-                                                      );
+                                    const SizedBox(height: 4),
 
-                                                  if (mounted) {
-                                                    setState(() {});
-                                                  }
-                                                } catch (e) {
-                                                  debugPrint(
-                                                    'Could not remove task due date: $e',
-                                                  );
-
-                                                  if (!context.mounted) {
-                                                    return;
-                                                  }
-
-                                                  ScaffoldMessenger.of(context)
-                                                      .showSnackBar(
-                                                        const SnackBar(
-                                                          content: Text(
-                                                            'Frist konnte nicht entfernt werden',
-                                                          ),
-                                                        ),
-                                                      );
-                                                }
-                                              },
-                                              icon: const Icon(Icons.close),
-                                              iconSize: 18,
-                                              padding: EdgeInsets.zero,
-                                              constraints: const BoxConstraints(
-                                                minWidth: 32,
-                                                minHeight: 32,
-                                              ),
-                                              tooltip: 'Frist entfernen',
+                                    // Repeat
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(8),
+                                      onTap: () => _pickRepeat(task),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 4,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.repeat,
+                                              size: 18,
+                                              color:
+                                                  task['repeat'] != null &&
+                                                      task['repeat'] != 'none'
+                                                  ? Theme.of(context)
+                                                      .colorScheme
+                                                      .primary
+                                                  : Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
                                             ),
-                                        ],
-                                      ),
 
-                                      const SizedBox(height: 4),
+                                            const SizedBox(width: 6),
 
-                                      // Repeat
-                                      InkWell(
-                                        borderRadius: BorderRadius.circular(8),
-                                        onTap: () => _pickRepeat(task),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 4,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.repeat,
-                                                size: 18,
+                                            Text(
+                                              task['repeat'] == 'daily'
+                                                  ? 'Täglich'
+                                                  : task['repeat'] == 'weekly'
+                                                      ? 'Wöchentlich'
+                                                      : task['repeat'] ==
+                                                          'monthly'
+                                                      ? 'Monatlich'
+                                                      : task['repeat']
+                                                          ?.toString()
+                                                          .startsWith(
+                                                            'custom:',
+                                                          ) ==
+                                                          true
+                                                      ? 'Alle ${task['repeat'].toString().split(':')[1]} Tage'
+                                                      : 'Keine Wiederholung',
+                                              style: TextStyle(
                                                 color:
                                                     task['repeat'] != null &&
                                                         task['repeat'] != 'none'
                                                     ? Theme.of(context)
-                                                          .colorScheme
-                                                          .primary
+                                                        .colorScheme
+                                                        .primary
                                                     : Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
                                               ),
-
-                                              const SizedBox(width: 6),
-
-                                              Text(
-                                                task['repeat'] == 'daily'
-                                                    ? 'Täglich'
-                                                    : task['repeat'] == 'weekly'
-                                                    ? 'Wöchentlich'
-                                                    : task['repeat'] ==
-                                                          'monthly'
-                                                    ? 'Monatlich'
-                                                    : 'Keine Wiederholung',
-                                                style: TextStyle(
-                                                  color:
-                                                      task['repeat'] != null &&
-                                                          task['repeat'] !=
-                                                              'none'
-                                                      ? Theme.of(context)
-                                                            .colorScheme
-                                                            .primary
-                                                      : Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
+                              ),
 
-                                IconButton(
-                                  onPressed: () async {
-                                    final messenger = ScaffoldMessenger.of(
-                                      context,
-                                    );
+                              IconButton(
+                                onPressed: () async {
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
 
-                                    try {
-                                      await NotificationService.instance
-                                          .cancelTaskNotification(
-                                            task['id'].toString(),
-                                          );
-
-                                      await WGData.deleteTask(task['id']);
-
-                                      if (mounted) {
-                                        setState(() {});
-                                      }
-                                    } catch (e) {
-                                      debugPrint('Could not delete task: $e');
-
-                                      if (mounted) {
-                                        messenger.showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Aufgabe konnte nicht gelöscht werden',
-                                            ),
-                                          ),
+                                  try {
+                                    await NotificationService.instance
+                                        .cancelTaskNotification(
+                                          task['id'].toString(),
                                         );
-                                      }
+
+                                    await WGData.deleteTask(task['id']);
+
+                                    if (mounted) {
+                                      setState(() {});
                                     }
-                                  },
-                                  icon: const Icon(Icons.delete_outline),
-                                  tooltip: 'Löschen',
-                                ),
-                              ],
-                            ),
+                                  } catch (e) {
+                                    debugPrint('Could not delete task: $e');
+
+                                    if (mounted) {
+                                      messenger.showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Aufgabe konnte nicht gelöscht werden',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: 'Löschen',
+                              ),
+                            ],
                           ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
+  }
+
+  List<Map<String, dynamic>> _tasksOnDay(DateTime day) {
+    final dayStart = DateTime(day.year, day.month, day.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+
+    return WGData.tasks.where((task) {
+      final dueDateValue = task['dueDate'];
+
+      if (dueDateValue == null) {
+        return false;
+      }
+
+      final dueDate = DateTime.tryParse(dueDateValue.toString());
+
+      if (dueDate == null) {
+        return false;
+      }
+
+      final taskDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
+
+      return taskDay == dayStart && dueDate.isBefore(dayEnd);
+    }).toList();
+  }
+
+  bool _hasTasksOnDay(DateTime day) {
+    return _tasksOnDay(day).isNotEmpty;
+  }
+
+  Widget _buildCalendarView() {
+    final now = DateTime.now();
+
+    final firstDayOfMonth = DateTime(
+      _calendarFocusedMonth.year,
+      _calendarFocusedMonth.month,
+      1,
+    );
+
+    final daysInMonth = DateUtils.getDaysInMonth(
+      _calendarFocusedMonth.year,
+      _calendarFocusedMonth.month,
+    );
+
+    final firstWeekday = firstDayOfMonth.weekday;
+
+    final leadingEmptyCells = (firstWeekday - DateTime.monday) % 7;
+
+    final totalCells = leadingEmptyCells + daysInMonth;
+
+    final trailingEmptyCells =
+        (7 - (totalCells % 7)) % 7;
+
+    final gridCells = <Widget>[];
+
+    for (var i = 0; i < leadingEmptyCells; i++) {
+      gridCells.add(const SizedBox.shrink());
+    }
+
+    for (var day = 1; day <= daysInMonth; day++) {
+      final date = DateTime(_calendarFocusedMonth.year, _calendarFocusedMonth.month, day);
+      final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
+      final isSelected = _selectedDay != null &&
+          _selectedDay!.year == date.year &&
+          _selectedDay!.month == date.month &&
+          _selectedDay!.day == date.day;
+      final hasTasks = _hasTasksOnDay(date);
+
+      gridCells.add(
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedDay = date;
+            });
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : isToday
+                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
+                      : null,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    day.toString(),
+                    style: TextStyle(
+                      fontWeight: isSelected || isToday
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.onPrimary
+                          : hasTasks
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                    ),
+                  ),
+                  if (hasTasks)
+                    Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.only(top: 2),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.onPrimary
+                            : Theme.of(context).colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    for (var i = 0; i < trailingEmptyCells; i++) {
+      gridCells.add(const SizedBox.shrink());
+    }
+
+    final selectedDayTasks = _selectedDay != null
+        ? _tasksOnDay(_selectedDay!)
+        : (WGData.tasks.where((task) {
+            final dueDateValue = task['dueDate'];
+
+            if (dueDateValue == null) {
+              return false;
+            }
+
+            final dueDate = DateTime.tryParse(dueDateValue.toString());
+
+            if (dueDate == null) {
+              return false;
+            }
+
+            final taskDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
+
+            return taskDay.year == now.year &&
+                taskDay.month == now.month &&
+                taskDay.day == now.day;
+          }).toList());
+
+    final monthName = _calendarFocusedMonth.month < 13
+        ? _monthName(_calendarFocusedMonth.month)
+        : '';
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _calendarFocusedMonth = DateTime(
+                      _calendarFocusedMonth.year,
+                      _calendarFocusedMonth.month - 1,
+                      1,
+                    );
+                  });
+                },
+                child: const Text('‹'),
+              ),
+              Text(
+                '$monthName ${_calendarFocusedMonth.year}',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _calendarFocusedMonth = DateTime(
+                      _calendarFocusedMonth.year,
+                      _calendarFocusedMonth.month + 1,
+                      1,
+                    );
+                  });
+                },
+                child: const Text('›'),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        GridView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            childAspectRatio: 0.9,
+          ),
+          itemCount: _weekdayNames.length,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemBuilder: (context, index) {
+            final isWeekend = index >= 5;
+
+            return Center(
+              child: Text(
+                _weekdayNames[index],
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isWeekend
+                      ? Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.6)
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            );
+          },
+        ),
+
+        const SizedBox(height: 4),
+
+        GridView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            childAspectRatio: 0.9,
+          ),
+          itemCount: gridCells.length,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemBuilder: (context, index) {
+            return gridCells[index];
+          },
+        ),
+
+        const SizedBox(height: 16),
+
+        Expanded(
+          child: selectedDayTasks.isEmpty
+              ? Center(
+                  child: Text(
+                    _selectedDay == null
+                        ? 'Tippe auf ein Datum, um Aufgaben anzuzeigen'
+                        : 'Keine Aufgaben an diesem Tag',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: selectedDayTasks.length,
+                  itemBuilder: (context, index) {
+                    final task = selectedDayTasks[index];
+                    final completed = task['completed'] as bool;
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: Icon(
+                          completed
+                              ? Icons.check_circle
+                              : Icons.circle_outlined,
+                          color: completed
+                              ? Colors.green
+                              : Theme.of(context).colorScheme.primary,
+                        ),
+                        title: Text(task['name']),
+                        subtitle: task['assignedTo'] != null
+                            ? Text(
+                                WGData.members
+                                    .firstWhere(
+                                      (m) => m.id == task['assignedTo'],
+                                      orElse: () => WGMember(
+                                        id: '',
+                                        name: 'Unbekannt',
+                                        colorIndex: 0,
+                                      ),
+                                    )
+                                    .name,
+                                style: TextStyle(
+                                  color: WGData.memberColor(
+                                    WGData.members.firstWhere(
+                                      (m) => m.id == task['assignedTo'],
+                                      orElse: () => WGMember(
+                                        id: '',
+                                        name: '',
+                                        colorIndex: 0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : null,
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  String _monthName(int month) {
+    const names = [
+      '',
+      'Januar',
+      'Februar',
+      'März',
+      'April',
+      'Mai',
+      'Juni',
+      'Juli',
+      'August',
+      'September',
+      'Oktober',
+      'November',
+      'Dezember',
+    ];
+
+    return month >= 1 && month <= 12 ? names[month] : '';
   }
 }

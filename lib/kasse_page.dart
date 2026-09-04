@@ -16,6 +16,73 @@ class _KassePageState extends State<KassePage> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _settleUp() async {
+    final balance = WGData.currentMemberBalance;
+
+    if (balance.abs() < 0.01) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kein Ausgleich nötig')),
+      );
+      return;
+    }
+
+    final isOwed = balance > 0;
+    final amount = balance.abs();
+    final memberName = WGData.currentMember?.name ?? 'Du';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Ausgleichen'),
+          content: Text(
+            isOwed
+                ? '$memberName bekommst €${amount.toStringAsFixed(2)} '
+                    'vom anderen WG-Mitgliedern.'
+                : 'Du schulst €${amount.toStringAsFixed(2)} '
+                    'an das WG-Kassen-Guthern.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Abbrechen'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.green,
+              ),
+              child: const Text('Ausgleichen'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    final otherMember = WGData.members.firstWhere(
+      (m) => m.id != WGData.currentMemberId,
+      orElse: () => WGData.members.first,
+    );
+
+    await WGData.addExpense(
+      description: 'Ausgleichszahlung',
+      amount: amount,
+      paidBy: isOwed ? otherMember.id : WGData.currentMemberId,
+      category: 'Ausgleich',
+      excludeFromBalance: true,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ausgleich erstellt')),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -247,6 +314,14 @@ class _KassePageState extends State<KassePage> {
                 ),
               );
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.payment_outlined),
+            tooltip: 'Ausgleichen',
+            onPressed: WGData.currentMemberId != null &&
+                    WGData.currentMemberBalance.abs() > 0.01
+                ? _settleUp
+                : null,
           ),
         ],
       ),

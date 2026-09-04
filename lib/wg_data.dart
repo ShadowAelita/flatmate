@@ -1667,6 +1667,7 @@ class WGData {
       'quantity': row['quantity'] ?? 1,
       'claimedBy': row['claimed_by'],
       'addedBy': row['added_by'],
+      'note': row['note'],
     };
   }
 
@@ -2220,6 +2221,7 @@ class WGData {
     required String name,
     int quantity = 1,
     String? addedBy,
+    String? note,
   }) async {
     if (householdId == null) return;
 
@@ -2232,6 +2234,7 @@ class WGData {
       'quantity': quantity,
       'claimedBy': null,
       'addedBy': addedBy ?? currentMemberId,
+      'note': note,
     };
 
     shoppingItems.add(item);
@@ -2246,6 +2249,7 @@ class WGData {
       'quantity': quantity,
       'claimed_by': null,
       'added_by': addedBy ?? currentMemberId,
+      'note': note,
     };
 
     try {
@@ -2482,6 +2486,7 @@ class WGData {
     int? quantity,
     String? claimedBy,
     bool clearClaimedBy = false,
+    String? note,
   }) async {
     if (householdId == null) return;
 
@@ -2499,6 +2504,10 @@ class WGData {
       updates['claimed_by'] = null;
     } else if (claimedBy != null) {
       updates['claimed_by'] = claimedBy;
+    }
+
+    if (note != null) {
+      updates['note'] = note;
     }
 
     if (updates.isEmpty) {
@@ -2523,6 +2532,10 @@ class WGData {
       } else if (claimedBy != null) {
         shoppingItems[index]['claimedBy'] = claimedBy;
       }
+
+      if (note != null) {
+        shoppingItems[index]['note'] = note;
+      }
     }
 
     _notifyAndCache();
@@ -2540,6 +2553,14 @@ class WGData {
 
       await _queueOperation('shopping_update', {'id': id, 'updates': updates});
     }
+  }
+
+  static Future<void> duplicateShoppingItem(Map<String, dynamic> item) async {
+    await addShoppingItem(
+      name: item['name']?.toString() ?? '',
+      quantity: item['quantity']?.toInt() ?? 1,
+      note: item['note']?.toString(),
+    );
   }
 
   static Future<void> deleteShoppingItem(String id) async {

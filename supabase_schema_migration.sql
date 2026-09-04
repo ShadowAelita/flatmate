@@ -56,6 +56,9 @@ ALTER TABLE shopping_items
     ADD COLUMN IF NOT EXISTS added_by UUID
     REFERENCES members(id) ON DELETE SET NULL;
 
+ALTER TABLE shopping_items
+    ADD COLUMN IF NOT EXISTS note TEXT;
+
 -- ============================================================
 -- CHAT_MESSAGES: Add reference columns for task/shopping item mentions
 -- ============================================================
@@ -171,6 +174,11 @@ CREATE POLICY "Allow all for expense_categories" ON expense_categories
 -- ============================================================
 GRANT SELECT, INSERT, UPDATE, DELETE ON expenses TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON expense_categories TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON shopping_items TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tasks TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON chat_messages TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON members TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON households TO anon;
 
 -- ============================================================
 -- Helper: Generate a new invite code (call from a Postgres function)

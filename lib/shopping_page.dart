@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'wg_data.dart';
 
@@ -14,6 +15,8 @@ class _ShoppingPageState extends State<ShoppingPage> {
 
   bool _showCompleted = true;
   VoidCallback? _versionListener;
+  bool _showSuggestions = false;
+  final Set<String> _suggestionCache = {};
 
   @override
   void initState() {
@@ -23,6 +26,57 @@ class _ShoppingPageState extends State<ShoppingPage> {
       if (mounted) setState(() {});
     };
     WGData.version.addListener(_versionListener!);
+
+    _controller.addListener(_onTextChanged);
+    _loadSuggestions();
+  }
+
+  Future<void> _loadSuggestions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('shopping_suggestions') ?? [];
+    setState(() {
+      _suggestionCache
+        ..clear()
+        ..addAll(saved);
+    });
+  }
+
+  Future<void> _saveSuggestions() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+        'shopping_suggestions', _suggestionCache.toList());
+  }
+
+  void _onTextChanged() {
+    final text = _controller.text.trim().toLowerCase();
+
+    if (text.isEmpty) {
+      if (mounted) {
+        setState(() => _showSuggestions = false);
+      }
+      return;
+    }
+
+    final suggestions = _suggestionCache
+        .where((name) => name.toLowerCase().contains(text))
+        .toList();
+
+    if (mounted) {
+      setState(() => _showSuggestions = suggestions.isNotEmpty);
+    }
+  }
+
+  List<String> get _visibleSuggestions {
+    final text = _controller.text.trim().toLowerCase();
+
+    if (text.isEmpty) {
+      return _suggestionCache.toList()..sort((a, b) => a.compareTo(b));
+    }
+
+    return _suggestionCache
+        .where((name) => name.toLowerCase().contains(text))
+        .toList()
+      ..sort((a, b) => a.compareTo(b));
   }
 
   @override
@@ -30,6 +84,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
     if (_versionListener != null) {
       WGData.version.removeListener(_versionListener!);
     }
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -44,7 +99,11 @@ class _ShoppingPageState extends State<ShoppingPage> {
     try {
       await WGData.addShoppingItem(name: item, quantity: 1);
 
+      _suggestionCache.add(item);
+      await _saveSuggestions();
+
       _controller.clear();
+      _showSuggestions = false;
 
       if (mounted) {
         setState(() {});
@@ -97,6 +156,74 @@ class _ShoppingPageState extends State<ShoppingPage> {
       }
     } catch (e) {
       debugPrint('Could not update shopping item claim: $e');
+    }
+  }
+
+  Future<void> _editNote(Map<String, dynamic> item) async {
+    final noteController =
+        TextEditingController(text: item['note']?.toString() ?? '');
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Notiz'),
+        content: TextField(
+          controller: noteController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Notiz',
+            hintText: 'z. B. Bio, 2% Fett...',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Abbrechen'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(context, noteController.text.trim()),
+            child: const Text('Speichern'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    final trimmed = result;
+
+    try {
+      await WGData.updateShoppingItem(
+        id: item['id'] as String,
+        note: trimmed.isEmpty ? null : trimmed,
+      );
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not update shopping item note: $e');
+    }
+  }
+
+  void _duplicateItem(Map<String, dynamic> item) async {
+    try {
+      await WGData.duplicateShoppingItem(item);
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Could not duplicate shopping item: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Einkauf konnte nicht dupliziert werden'),
+          ),
+        );
+      }
     }
   }
 
@@ -172,6 +299,21 @@ class _ShoppingPageState extends State<ShoppingPage> {
                           : null,
                     ),
                   ),
+
+                  if (item['note']?.toString().isNotEmpty == true)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        item['note'].toString(),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant
+                              .withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
 
                   const SizedBox(height: 6),
 
@@ -272,6 +414,18 @@ class _ShoppingPageState extends State<ShoppingPage> {
             ),
 
             IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _editNote(item),
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Notiz bearbeiten',
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _duplicateItem(item),
+              icon: const Icon(Icons.content_copy),
+              tooltip: 'Duplizieren',
+            ),
+            IconButton(
               onPressed: () async {
                 try {
                   await WGData.deleteShoppingItem(item['id'] as String);
@@ -292,6 +446,37 @@ class _ShoppingPageState extends State<ShoppingPage> {
     );
   }
 
+  Widget _buildShoppingItemWithDismiss(
+    BuildContext context,
+    Map<String, dynamic> item,
+    int index,
+  ) {
+    final itemId = item['id']?.toString() ?? index.toString();
+
+    return Dismissible(
+      key: ValueKey('shopping_$itemId'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (direction) async {
+        try {
+          await WGData.deleteShoppingItem(item['id'] as String);
+        } catch (e) {
+          debugPrint('Could not delete shopping item: $e');
+        }
+
+        if (mounted) {
+          setState(() {});
+        }
+      },
+      child: _buildShoppingItem(context, item, index),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final openItems = WGData.shoppingItems
@@ -308,26 +493,68 @@ class _ShoppingPageState extends State<ShoppingPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    textInputAction: TextInputAction.done,
-                    decoration: const InputDecoration(
-                      labelText: 'Was brauchen wir?',
-                      hintText: 'z. B. Milch',
-                      prefixIcon: Icon(Icons.shopping_cart_outlined),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(
+                          labelText: 'Was brauchen wir?',
+                          hintText: 'z. B. Milch',
+                          prefixIcon: Icon(Icons.shopping_cart_outlined),
+                        ),
+                        onSubmitted: (_) => _addItem(),
+                        onTap: _onTextChanged,
+                      ),
                     ),
-                    onSubmitted: (_) => _addItem(),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _addItem,
+                      icon: const Icon(Icons.add),
+                      tooltip: 'Hinzufügen',
+                    ),
+                  ],
+                ),
+
+                if (_showSuggestions && _visibleSuggestions.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outline,
+                        width: 0.5,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _visibleSuggestions.length,
+                      itemBuilder: (context, index) {
+                        final suggestion = _visibleSuggestions[index];
+                        return ListTile(
+                          leading: const Icon(
+                            Icons.shopping_cart_outlined,
+                            size: 16,
+                          ),
+                          title: Text(
+                            suggestion,
+                            style: const TextStyle(fontSize: 15),
+                          ),
+                          onTap: () {
+                            _controller.text = suggestion;
+                            _showSuggestions = false;
+                            setState(() {});
+                          },
+                        );
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: _addItem,
-                  icon: const Icon(Icons.add),
-                  tooltip: 'Hinzufügen',
-                ),
               ],
             ),
 
@@ -360,7 +587,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
                     )
                   else
                     ...openItems.map(
-                      (item) => _buildShoppingItem(
+                      (item) => _buildShoppingItemWithDismiss(
                         context,
                         item,
                         WGData.shoppingItems.indexOf(item),
