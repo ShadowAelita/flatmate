@@ -8,6 +8,7 @@ import 'wg_data.dart';
 import 'chat_page.dart';
 import 'settings_page.dart';
 import 'kasse_page.dart';
+import 'inventory_page.dart';
 import 'stats_easter_egg_page.dart';
 import 'notifications/notification_preferences.dart';
 
@@ -62,6 +63,8 @@ class _HomePageState extends State<HomePage> {
     switch (cardId) {
       case 'shopping':
         return _buildShoppingCard(currentMemberShoppingItems);
+      case 'inventory':
+        return _buildInventoryCard();
       case 'tasks':
         return _buildTasksCard(currentMemberTasks);
       case 'chat':
@@ -247,6 +250,55 @@ class _HomePageState extends State<HomePage> {
               Text(WGData.householdName ?? 'Unsere WG', textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text(WGData.memberCount == 1 ? '1 Bewohner' : '${WGData.memberCount} Bewohner'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInventoryCard() {
+    final lowItems = WGData.inventoryItems.where((item) {
+      final quantity = (item['quantity'] as num?)?.toDouble() ?? 0;
+      final minQuantity = (item['min_quantity'] as num?)?.toDouble() ?? 0;
+      return quantity <= minQuantity && minQuantity > 0;
+    }).toList();
+
+    final itemCount = WGData.inventoryItems.length;
+
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (context) => const InventoryPage()));
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.inventory_2,
+                size: 48,
+                color: lowItems.isNotEmpty ? Colors.red : null,
+              ),
+              const SizedBox(height: 16),
+              const Text('Inventar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              if (lowItems.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '${lowItems.length} niedrig!',
+                    style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              Text(
+                '$itemCount ${itemCount == 1 ? 'Artikel' : 'Artikel'}',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                textAlign: TextAlign.center,
+              ),
             ],
           ),
         ),

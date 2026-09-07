@@ -24,6 +24,7 @@ class NotificationPreferences extends ChangeNotifier {
   static const String _generalKey = 'notifications_general';
   static const String _darkModeKey = 'app_dark_mode';
   static const String _dashboardCardsKey = 'dashboard_cards';
+  static const String _inventoryAutoCreateShoppingKey = 'inventory_auto_create_shopping';
 
   SharedPreferences? _prefs;
 
@@ -38,6 +39,7 @@ class NotificationPreferences extends ChangeNotifier {
 
   static const List<String> _defaultCardOrder = [
     'shopping',
+    'inventory',
     'tasks',
     'chat',
     'balance',
@@ -46,6 +48,7 @@ class NotificationPreferences extends ChangeNotifier {
 
   static const Map<String, String> _cardNames = {
     'shopping': 'Einkaufen',
+    'inventory': 'Inventar',
     'tasks': 'Aufgaben',
     'chat': 'Chat',
     'balance': 'WG-Kasse',
@@ -60,6 +63,8 @@ class NotificationPreferences extends ChangeNotifier {
   bool get general => _general;
   bool get isDarkMode => _isDarkMode;
   List<DashboardCard> get dashboardCards => List.unmodifiable(_dashboardCards);
+  bool get inventoryAutoCreateShopping => _inventoryAutoCreateShopping;
+  bool _inventoryAutoCreateShopping = true;
 
   Future<void> initialize() async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -78,6 +83,8 @@ class NotificationPreferences extends ChangeNotifier {
     _chat = _prefs!.getBool(_chatKey) ?? true;
     _general = _prefs!.getBool(_generalKey) ?? true;
     _isDarkMode = _prefs!.getBool(_darkModeKey) ?? true;
+
+    _inventoryAutoCreateShopping = _prefs!.getBool(_inventoryAutoCreateShoppingKey) ?? true;
 
     await _loadDashboardCards();
 
@@ -220,6 +227,15 @@ class NotificationPreferences extends ChangeNotifier {
     notifyListeners();
 
     await _prefs!.setBool(_darkModeKey, value);
+  }
+
+  Future<void> setInventoryAutoCreateShopping(bool value) async {
+    await _ensureInitialized();
+
+    _inventoryAutoCreateShopping = value;
+    notifyListeners();
+
+    await _prefs!.setBool(_inventoryAutoCreateShoppingKey, value);
   }
 
   Future<void> _ensureInitialized() async {

@@ -3038,6 +3038,8 @@ class WGData {
       (item) => item['id']?.toString() == id,
     );
 
+    final wasCompleted = index != -1 && shoppingItems[index]['completed'] == true;
+
     if (index != -1) {
       if (completed != null) {
         shoppingItems[index]['completed'] = completed;
@@ -3073,6 +3075,11 @@ class WGData {
 
       await _queueOperation('shopping_update', {'id': id, 'updates': updates});
     }
+
+    if (completed == true && !wasCompleted && index != -1) {
+      final shoppingItem = shoppingItems[index];
+      _adjustInventoryFromShopping(shoppingItem);
+    }
   }
 
   static Future<void> duplicateShoppingItem(Map<String, dynamic> item) async {
@@ -3103,6 +3110,27 @@ class WGData {
 
       await _queueOperation('shopping_delete', {'id': id});
     }
+  }
+
+  static Future<void> _adjustInventoryFromShopping(Map<String, dynamic> shoppingItem) async {
+    if (householdId == null) return;
+
+    final name = shoppingItem['name']?.toString().toLowerCase() ?? '';
+    if (name.isEmpty) return;
+
+    final index = inventoryItems.indexWhere(
+      (item) => (item['name']?.toString().toLowerCase() ?? '') == name,
+    );
+
+    if (index == -1) return;
+
+    final currentQuantity = (inventoryItems[index]['quantity'] as num?)?.toDouble() ?? 0;
+    final newQuantity = currentQuantity + 1;
+
+    await updateInventoryItem(
+      inventoryItems[index]['id'].toString(),
+      quantity: newQuantity,
+    );
   }
 
   // ============================================================
@@ -3340,6 +3368,10 @@ class WGData {
       (item) => item['id']?.toString() == id,
     );
 
+    final oldQuantity = index != -1
+        ? ((inventoryItems[index]['quantity'] as num?)?.toDouble() ?? 0.0)
+        : 0.0;
+
     if (index != -1) {
       if (quantity != null) {
         inventoryItems[index]['quantity'] = quantity;
@@ -3365,6 +3397,10 @@ class WGData {
 
       await _queueOperation('inventory_update', {'id': id, 'updates': updates});
     }
+
+    if (quantity != null && index != -1) {
+      _checkInventoryThresholdAndCreateShopping(id, oldQuantity, quantity);
+    }
   }
 
   static Future<void> deleteInventoryItem(String id) async {
@@ -3386,6 +3422,40 @@ class WGData {
       _isOnline = false;
 
       await _queueOperation('inventory_delete', {'id': id});
+    }
+  }
+
+  static Future<void> _checkInventoryThresholdAndCreateShopping(
+    String inventoryId,
+    double oldQuantity,
+    double? newQuantity,
+  ) async {
+    if (_notificationPrefs == null || !_notificationPrefs!.inventoryAutoCreateShopping) return;
+    if (newQuantity == null) return;
+
+    final index = inventoryItems.indexWhere(
+      (item) => item['id']?.toString() == inventoryId,
+    );
+
+    if (index == -1) return;
+
+    final item = inventoryItems[index];
+    final minQuantity = (item['min_quantity'] as num?)?.toDouble() ?? 0;
+    final name = item['name']?.toString() ?? '';
+
+    if (minQuantity <= 0 || name.isEmpty) return;
+
+    final wasAboveThreshold = oldQuantity > minQuantity;
+    final isAtOrBelowThreshold = newQuantity <= minQuantity;
+
+    if (!wasAboveThreshold || !isAtOrBelowThreshold) return;
+
+    final existingShopping = shoppingItems.any((s) =>
+        (s['name']?.toString().toLowerCase() ?? '') == name.toLowerCase() &&
+        s['completed'] != true);
+
+    if (!existingShopping) {
+      await addShoppingItem(name: name, quantity: 1);
     }
   }
 

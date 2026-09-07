@@ -140,6 +140,15 @@ class SettingsPage extends StatelessWidget {
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => _showDashboardCustomization(context),
                     ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      title: const Text('Inventar → Einkauf automatisch erstellen'),
+                      subtitle: const Text('Bei niedrigem Bestand automatisch Einkauf anlegen'),
+                      value: prefs.inventoryAutoCreateShopping,
+                      onChanged: (value) {
+                        prefs.setInventoryAutoCreateShopping(value);
+                      },
+                    ),
                   ],
                 );
               },
