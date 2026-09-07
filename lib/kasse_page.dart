@@ -73,7 +73,7 @@ class _KassePageState extends State<KassePage> {
       amount: amount,
       paidBy: isOwed ? otherMember.id : WGData.currentMemberId,
       category: 'Ausgleich',
-      excludeFromBalance: true,
+      excludeFromBalance: false,
     );
 
     if (mounted) {
@@ -950,6 +950,7 @@ class _KassePageState extends State<KassePage> {
 
     for (final e in expenseList) {
       if (e['excludeFromBalance'] == true) continue;
+      if (e['category']?.toString() == 'Ausgleich') continue;
 
       final createdAt = e['createdAt']?.toString();
 

@@ -2477,6 +2477,7 @@ class WGData {
 
     for (final e in expenses) {
       if (e['excludeFromBalance'] == true) continue;
+      if (e['category']?.toString() == 'Ausgleich') continue;
 
       final createdAt = e['createdAt']?.toString();
 
