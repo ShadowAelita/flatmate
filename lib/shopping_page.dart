@@ -341,14 +341,74 @@ class _ShoppingPageState extends State<ShoppingPage> {
                         tooltip: 'Weniger',
                       ),
 
-                      Container(
-                        width: 32,
-                        alignment: Alignment.center,
-                        child: Text(
-                          '$quantity',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                      InkWell(
+                        onTap: () async {
+                          final controller = TextEditingController(
+                            text: quantity.toString(),
+                          );
+
+                          final result = await showDialog<String>(
+                            context: context,
+                            builder: (dialogContext) => AlertDialog(
+                              title: const Text('Menge'),
+                              content: TextField(
+                                controller: controller,
+                                autofocus: true,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Anzahl',
+                                  hintText: 'z. B. 3',
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(dialogContext, null),
+                                  child: const Text('Abbrechen'),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    final value = int.tryParse(controller.text);
+
+                                    if (value != null && value > 0) {
+                                      Navigator.pop(dialogContext, '$value');
+                                    }
+                                  },
+                                  child: const Text('OK'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (result == null || !mounted) return;
+
+                          final newQuantity = int.tryParse(result);
+
+                          if (newQuantity == null || newQuantity == quantity) return;
+
+                          try {
+                            await WGData.updateShoppingItem(
+                              id: item['id'] as String,
+                              quantity: newQuantity,
+                            );
+
+                            if (mounted) {
+                              setState(() {});
+                            }
+                          } catch (e) {
+                            debugPrint('Could not update quantity: $e');
+                          }
+                        },
+                        child: Container(
+                          width: 32,
+                          alignment: Alignment.center,
+                          child: Text(
+                            '$quantity',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
                           ),
                         ),
                       ),

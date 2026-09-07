@@ -989,7 +989,14 @@ class WGData {
       if (aTime == null) return -1;
       if (bTime == null) return 1;
 
-      return aTime.compareTo(bTime);
+      final timeCompare = aTime.compareTo(bTime);
+
+      if (timeCompare != 0) return timeCompare;
+
+      final aId = a['id']?.toString() ?? '';
+      final bId = b['id']?.toString() ?? '';
+
+      return aId.compareTo(bId);
     });
   }
 
@@ -1270,7 +1277,14 @@ class WGData {
       if (aTime == null) return -1;
       if (bTime == null) return 1;
 
-      return aTime.compareTo(bTime);
+      final timeCompare = aTime.compareTo(bTime);
+
+      if (timeCompare != 0) return timeCompare;
+
+      final aId = a['id']?.toString() ?? '';
+      final bId = b['id']?.toString() ?? '';
+
+      return aId.compareTo(bId);
     });
 
     _notifyAndCache();
@@ -1861,7 +1875,7 @@ class WGData {
         .from('chat_messages')
         .select('*')
         .eq('household_id', householdId!)
-        .order('timestamp');
+        .order('timestamp', ascending: true);
 
     chatMessages.clear();
 
@@ -1869,6 +1883,7 @@ class WGData {
       chatMessages.add(_chatFromRow(row));
     }
 
+    _sortChatMessages();
     _recalculateUnreadCount();
   }
 
@@ -2461,6 +2476,8 @@ class WGData {
     final result = <String, double>{};
 
     for (final e in expenses) {
+      if (e['excludeFromBalance'] == true) continue;
+
       final createdAt = e['createdAt']?.toString();
 
       if (createdAt == null) continue;

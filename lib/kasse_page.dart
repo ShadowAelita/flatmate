@@ -949,6 +949,8 @@ class _KassePageState extends State<KassePage> {
     final result = <String, double>{};
 
     for (final e in expenseList) {
+      if (e['excludeFromBalance'] == true) continue;
+
       final createdAt = e['createdAt']?.toString();
 
       if (createdAt == null) continue;
