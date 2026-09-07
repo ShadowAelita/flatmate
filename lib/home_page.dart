@@ -7,9 +7,24 @@ import 'wg_data.dart';
 import 'chat_page.dart';
 import 'settings_page.dart';
 import 'kasse_page.dart';
+import 'chores_page.dart';
+import 'inventory_page.dart';
+import 'meals_page.dart';
+import 'polls_page.dart';
+import 'search_page.dart';
+import 'rent_split_page.dart';
+import 'stats_easter_egg_page.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int _tapCount = 0;
+  DateTime? _lastTap;
 
   Color _taskDueDateColor(BuildContext context, Map<String, dynamic> task) {
     final value = task['dueDate'];
@@ -73,15 +88,30 @@ class HomePage extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                      GestureDetector(
-                       onTap: () {
-                         Navigator.push(
-                           context,
-                           MaterialPageRoute(
-                             builder: (context) => const MembersPage(),
-                           ),
-                         );
-                       },
-                       child: CircleAvatar(
+                        onTap: () {
+                          final now = DateTime.now();
+
+                          if (_lastTap == null ||
+                              now.difference(_lastTap!).inSeconds > 3) {
+                            _tapCount = 1;
+                          } else {
+                            _tapCount++;
+                          }
+
+                          _lastTap = now;
+
+                          if (_tapCount >= 7) {
+                            _tapCount = 0;
+
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const StatsEasterEggPage(),
+                              ),
+                            );
+                          }
+                        },
+                        child: CircleAvatar(
                          radius: 28,
                          backgroundColor: currentMember == null
                              ? Theme.of(context)
@@ -510,6 +540,218 @@ class HomePage extends StatelessWidget {
                                       ? '1 Bewohner'
                                       : '${WGData.memberCount} Bewohner',
                                 ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 🧹 Putzdienst
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ChoresPage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.cleaning_services, size: 48),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Putzdienst',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${WGData.chores.length} Aufgaben',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 📦 Inventar
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const InventoryPage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.inventory_2, size: 48),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Inventar',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${WGData.inventoryItems.length} Artikel',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 🍽️ Essensplaner
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const MealsPage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.restaurant, size: 48),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Essensplaner',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${WGData.meals.length} Gerichte',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 📊 Umfragen
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const PollsPage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.poll, size: 48),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Umfragen',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '${WGData.polls.length} offen',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 🔍 Suche
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const SearchPage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.search, size: 48),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Suche',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                const Text('Aufgaben, Chat, Einkäufe'),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 🏠 Mietanteile
+                      Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const RentSplitPage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.house, size: 48),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Mietanteile',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                const Text('Miete berechnen'),
                               ],
                             ),
                           ),

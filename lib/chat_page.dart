@@ -134,6 +134,38 @@ class _ChatPageState extends State<ChatPage> {
     return spans;
   }
 
+  Future<void> _showReactionPicker(String messageId) async {
+    final emojis = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: emojis
+                  .map((e) => InkWell(
+                        onTap: () => Navigator.pop(context, e),
+                        child: Text(e, style: const TextStyle(fontSize: 28)),
+                      ))
+                  .toList(),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected == null) return;
+
+    await WGData.toggleReaction(messageId, selected);
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     final member = WGData.currentMember;
@@ -996,11 +1028,9 @@ class _ChatPageState extends State<ChatPage> {
                         margin: const EdgeInsets.only(bottom: 12),
                         child: GestureDetector(
                           onLongPress: () {
-                            _showMessageActions(
-                              message,
-                              sender,
-                              isCurrentMember,
-                            );
+                            if (WGData.currentMemberId == null) return;
+
+                            _showReactionPicker(message['id'].toString());
                           },
                           child: Align(
                             alignment: isCurrentMember

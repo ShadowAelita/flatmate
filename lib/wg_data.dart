@@ -30,6 +30,12 @@ class WGData {
   static final List<Map<String, dynamic>> chatMessages = [];
   static final List<Map<String, dynamic>> expenses = [];
   static final List<String> expenseCategories = [];
+  static final List<Map<String, dynamic>> chores = [];
+  static final List<Map<String, dynamic>> inventoryItems = [];
+  static final List<Map<String, dynamic>> meals = [];
+  static final List<Map<String, dynamic>> polls = [];
+  static final List<Map<String, dynamic>> pollOptions = [];
+  static final List<Map<String, dynamic>> pollVotes = [];
   static List<Map<String, dynamic>> _pendingOperations = [];
 
   static String? householdId;
@@ -481,6 +487,80 @@ class WGData {
         }
       }
 
+      // CHORES
+      chores.clear();
+
+      final cachedChores = cached['chores'];
+
+      if (cachedChores is List) {
+        for (final row in cachedChores) {
+          if (row is Map) {
+            chores.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      // INVENTORY
+      inventoryItems.clear();
+
+      final cachedInventory = cached['inventoryItems'];
+
+      if (cachedInventory is List) {
+        for (final row in cachedInventory) {
+          if (row is Map) {
+            inventoryItems.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      // MEALS
+      meals.clear();
+
+      final cachedMeals = cached['meals'];
+
+      if (cachedMeals is List) {
+        for (final row in cachedMeals) {
+          if (row is Map) {
+            meals.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      // POLLS
+      polls.clear();
+      pollOptions.clear();
+      pollVotes.clear();
+
+      final cachedPolls = cached['polls'];
+
+      if (cachedPolls is List) {
+        for (final row in cachedPolls) {
+          if (row is Map) {
+            polls.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      final cachedPollOptions = cached['pollOptions'];
+
+      if (cachedPollOptions is List) {
+        for (final row in cachedPollOptions) {
+          if (row is Map) {
+            pollOptions.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
+      final cachedPollVotes = cached['pollVotes'];
+
+      if (cachedPollVotes is List) {
+        for (final row in cachedPollVotes) {
+          if (row is Map) {
+            pollVotes.add(Map<String, dynamic>.from(row));
+          }
+        }
+      }
+
       _sortTasksLocally();
     } catch (error) {
       debugPrint('Could not load local cache: $error');
@@ -512,6 +592,12 @@ class WGData {
         'chatMessages': chatMessages.map(Map<String, dynamic>.from).toList(),
         'expenses': expenses.map(Map<String, dynamic>.from).toList(),
         'expenseCategories': List<String>.from(expenseCategories),
+        'chores': chores.map(Map<String, dynamic>.from).toList(),
+        'inventoryItems': inventoryItems.map(Map<String, dynamic>.from).toList(),
+        'meals': meals.map(Map<String, dynamic>.from).toList(),
+        'polls': polls.map(Map<String, dynamic>.from).toList(),
+        'pollOptions': pollOptions.map(Map<String, dynamic>.from).toList(),
+        'pollVotes': pollVotes.map(Map<String, dynamic>.from).toList(),
       };
 
       await _prefs!.setString(_cacheKey, jsonEncode(data));
@@ -819,6 +905,11 @@ class WGData {
         _loadChatMessages(),
         _loadExpenses(),
         _loadExpenseCategories(),
+        loadChores(),
+        loadInventory(),
+        loadMeals(),
+        loadPolls(),
+        loadReactions(),
       ]).timeout(const Duration(seconds: 8));
 
       _isOnline = true;
@@ -953,6 +1044,103 @@ class WGData {
       callback: (payload) {
         _deferRealtime(() {
           _handleExpenseCategoriesRealtime(payload);
+        });
+      },
+    );
+
+    // ------------------------------------------------------------
+    // CHORES
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'chores',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleChoreRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    // ------------------------------------------------------------
+    // INVENTORY_ITEMS
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'inventory_items',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleInventoryRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    // ------------------------------------------------------------
+    // MEALS
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'meals',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleMealRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    // ------------------------------------------------------------
+    // POLLS
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'polls',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handlePollRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'poll_options',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handlePollOptionRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'poll_votes',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handlePollVoteRealtime(payload, currentHouseholdId);
+        });
+      },
+    );
+
+    // ------------------------------------------------------------
+    // MESSAGE_REACTIONS
+    // ------------------------------------------------------------
+
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'message_reactions',
+      callback: (payload) {
+        _deferRealtime(() {
+          _handleReactionRealtime(payload);
         });
       },
     );
@@ -1371,6 +1559,320 @@ class WGData {
       default:
         return;
     }
+  }
+
+  static void _handleChoreRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final table = payload.table;
+
+    final id = (payload.newRecord['id'] ?? payload.oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (chores.any((c) => c['id']?.toString() == id)) {
+          return;
+        }
+
+        chores.add(Map<String, dynamic>.from(payload.newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = chores.indexWhere(
+          (c) => c['id']?.toString() == id,
+        );
+
+        if (index == -1) {
+          chores.add(Map<String, dynamic>.from(payload.newRecord));
+        } else {
+          chores[index] = Map<String, dynamic>.from(payload.newRecord);
+        }
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        chores.removeWhere((c) => c['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handleInventoryRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final table = payload.table;
+
+    final id = (payload.newRecord['id'] ?? payload.oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (inventoryItems.any((i) => i['id']?.toString() == id)) {
+          return;
+        }
+
+        inventoryItems.add(Map<String, dynamic>.from(payload.newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = inventoryItems.indexWhere(
+          (i) => i['id']?.toString() == id,
+        );
+
+        if (index == -1) {
+          inventoryItems.add(Map<String, dynamic>.from(payload.newRecord));
+        } else {
+          inventoryItems[index] = Map<String, dynamic>.from(payload.newRecord);
+        }
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        inventoryItems.removeWhere((i) => i['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handleMealRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final table = payload.table;
+
+    final id = (payload.newRecord['id'] ?? payload.oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        if (meals.any((m) => m['id']?.toString() == id)) {
+          return;
+        }
+
+        meals.add(Map<String, dynamic>.from(payload.newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = meals.indexWhere((m) => m['id']?.toString() == id);
+
+        if (index == -1) {
+          meals.add(Map<String, dynamic>.from(payload.newRecord));
+        } else {
+          meals[index] = Map<String, dynamic>.from(payload.newRecord);
+        }
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        meals.removeWhere((m) => m['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handlePollRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final table = payload.table;
+
+    final id = (payload.newRecord['id'] ?? payload.oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    if (!_belongsToHousehold(payload, currentHouseholdId)) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        loadPolls();
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = polls.indexWhere((p) => p['id']?.toString() == id);
+
+        if (index != -1) {
+          polls[index] = Map<String, dynamic>.from(payload.newRecord);
+        } else {
+          polls.add(Map<String, dynamic>.from(payload.newRecord));
+        }
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        polls.removeWhere((p) => p['id']?.toString() == id);
+        pollOptions.removeWhere((o) => o['poll_id']?.toString() == id);
+        pollVotes.removeWhere((v) => v['poll_id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handlePollOptionRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final id = (payload.newRecord['id'] ?? payload.oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        pollOptions.add(Map<String, dynamic>.from(payload.newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = pollOptions.indexWhere(
+          (o) => o['id']?.toString() == id,
+        );
+
+        if (index != -1) {
+          pollOptions[index] = Map<String, dynamic>.from(payload.newRecord);
+        }
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        pollOptions.removeWhere((o) => o['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handlePollVoteRealtime(
+    PostgresChangePayload payload,
+    String currentHouseholdId,
+  ) {
+    final id = (payload.newRecord['id'] ?? payload.oldRecord['id'])?.toString();
+
+    if (id == null) {
+      return;
+    }
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        pollVotes.add(Map<String, dynamic>.from(payload.newRecord));
+        break;
+
+      case PostgresChangeEvent.update:
+        final index = pollVotes.indexWhere(
+          (v) => v['id']?.toString() == id,
+        );
+
+        if (index != -1) {
+          pollVotes[index] = Map<String, dynamic>.from(payload.newRecord);
+        }
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        pollVotes.removeWhere((v) => v['id']?.toString() == id);
+        break;
+
+      default:
+        return;
+    }
+
+    _notifyAndCache();
+  }
+
+  static void _handleReactionRealtime(
+    PostgresChangePayload payload,
+  ) {
+    final messageId = payload.newRecord['message_id']?.toString();
+
+    if (messageId == null) {
+      return;
+    }
+
+    final message = chatMessages.firstWhere(
+      (m) => m['id']?.toString() == messageId,
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (message.isEmpty) {
+      return;
+    }
+
+    final reactions = message['reactions'] as List<dynamic>? ?? [];
+
+    switch (payload.eventType) {
+      case PostgresChangeEvent.insert:
+        reactions.add({
+          'member_id': payload.newRecord['member_id'],
+          'emoji': payload.newRecord['emoji'],
+        });
+
+        break;
+
+      case PostgresChangeEvent.delete:
+        final oldMemberId = payload.oldRecord['member_id']?.toString();
+        final oldEmoji = payload.oldRecord['emoji']?.toString();
+
+        reactions.removeWhere(
+          (r) =>
+              r['member_id']?.toString() == oldMemberId &&
+              r['emoji']?.toString() == oldEmoji,
+        );
+
+        break;
+
+      default:
+        return;
+    }
+
+    message['reactions'] = reactions;
+
+    _notifyAndCache();
   }
 
   // ============================================================
@@ -2601,6 +3103,659 @@ class WGData {
 
       await _queueOperation('shopping_delete', {'id': id});
     }
+  }
+
+  // ============================================================
+  // CHORES
+  // ============================================================
+
+  static Future<void> loadChores() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('chores')
+        .select('*')
+        .eq('household_id', householdId!)
+        .order('created_at');
+
+    chores.clear();
+
+    for (final row in response) {
+      chores.add(Map<String, dynamic>.from(row));
+    }
+  }
+
+  static Future<void> addChore(String name, String frequency) async {
+    if (householdId == null) return;
+
+    final data = <String, dynamic>{
+      'household_id': householdId,
+      'name': name,
+      'frequency': frequency,
+    };
+
+    chores.add(data);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase.from('chores').insert(data);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('chore_add', data);
+    }
+  }
+
+  static Future<void> completeChore(String id) async {
+    if (householdId == null) return;
+
+    final index = chores.indexWhere((c) => c['id']?.toString() == id);
+
+    if (index != -1) {
+      chores[index]['last_completed_at'] = DateTime.now().toIso8601String();
+    }
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('chores')
+          .update({'last_completed_at': DateTime.now().toIso8601String()})
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('chore_complete', {'id': id});
+    }
+  }
+
+  static Future<void> deleteChore(String id) async {
+    if (householdId == null) return;
+
+    chores.removeWhere((c) => c['id']?.toString() == id);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('chores')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('chore_delete', {'id': id});
+    }
+  }
+
+  static Future<void> rotateChores() async {
+    if (householdId == null || members.isEmpty) return;
+
+    final activeMembers = List<WGMember>.from(members);
+
+    if (activeMembers.isEmpty) return;
+
+    for (final chore in chores) {
+      final currentIndex = chore['rotation_index'] as int? ?? 0;
+      final nextIndex = (currentIndex + 1) % activeMembers.length;
+      final nextMember = activeMembers[nextIndex];
+
+      chore['rotation_index'] = nextIndex;
+      chore['assigned_to'] = nextMember.id;
+
+      try {
+        await _supabase
+            .from('chores')
+            .update({
+              'rotation_index': nextIndex,
+              'assigned_to': nextMember.id,
+            })
+            .eq('id', chore['id'])
+            .eq('household_id', householdId!);
+      } catch (error) {
+        debugPrint('Could not rotate chore: $error');
+      }
+    }
+
+    _notifyAndCache();
+  }
+
+  static Future<void> lotteryAssignChores() async {
+    if (householdId == null || members.isEmpty) return;
+
+    final activeMembers = List<WGMember>.from(members);
+    final random = Random();
+
+    final assigned = <String, bool>{};
+
+    for (final chore in chores) {
+      WGMember? chosen;
+
+      do {
+        chosen = activeMembers[random.nextInt(activeMembers.length)];
+      } while (assigned[chosen!.id] == true && activeMembers.length > 1);
+
+      assigned[chosen.id] = true;
+
+      chore['rotation_index'] = activeMembers.indexOf(chosen);
+      chore['assigned_to'] = chosen.id;
+
+      try {
+        await _supabase
+            .from('chores')
+            .update({
+              'rotation_index': activeMembers.indexOf(chosen),
+              'assigned_to': chosen.id,
+            })
+            .eq('id', chore['id'])
+            .eq('household_id', householdId!);
+      } catch (error) {
+        debugPrint('Could not lottery assign chore: $error');
+      }
+    }
+
+    _notifyAndCache();
+  }
+
+  // ============================================================
+  // INVENTORY
+  // ============================================================
+
+  static Future<void> loadInventory() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('household_id', householdId!)
+        .order('name');
+
+    inventoryItems.clear();
+
+    for (final row in response) {
+      inventoryItems.add(Map<String, dynamic>.from(row));
+    }
+  }
+
+  static Future<void> addInventoryItem(
+    String name,
+    double quantity,
+    String unit,
+    double minQuantity,
+  ) async {
+    if (householdId == null) return;
+
+    final data = <String, dynamic>{
+      'household_id': householdId,
+      'name': name,
+      'quantity': quantity,
+      'unit': unit,
+      'min_quantity': minQuantity,
+    };
+
+    inventoryItems.add(data);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase.from('inventory_items').insert(data);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('inventory_add', data);
+    }
+  }
+
+  static Future<void> updateInventoryItem(
+    String id, {
+    double? quantity,
+    double? minQuantity,
+  }) async {
+    if (householdId == null) return;
+
+    final updates = <String, dynamic>{};
+
+    if (quantity != null) {
+      updates['quantity'] = quantity;
+    }
+
+    if (minQuantity != null) {
+      updates['min_quantity'] = minQuantity;
+    }
+
+    if (updates.isEmpty) return;
+
+    final index = inventoryItems.indexWhere(
+      (item) => item['id']?.toString() == id,
+    );
+
+    if (index != -1) {
+      if (quantity != null) {
+        inventoryItems[index]['quantity'] = quantity;
+      }
+
+      if (minQuantity != null) {
+        inventoryItems[index]['min_quantity'] = minQuantity;
+      }
+    }
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('inventory_items')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('inventory_update', {'id': id, 'updates': updates});
+    }
+  }
+
+  static Future<void> deleteInventoryItem(String id) async {
+    if (householdId == null) return;
+
+    inventoryItems.removeWhere((item) => item['id']?.toString() == id);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('inventory_items')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('inventory_delete', {'id': id});
+    }
+  }
+
+  // ============================================================
+  // MEALS
+  // ============================================================
+
+  static Future<void> loadMeals() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('meals')
+        .select('*')
+        .eq('household_id', householdId!)
+        .order('name');
+
+    meals.clear();
+
+    for (final row in response) {
+      meals.add(Map<String, dynamic>.from(row));
+    }
+  }
+
+  static Future<void> addMeal(String name, String recipe) async {
+    if (householdId == null) return;
+
+    final data = <String, dynamic>{
+      'household_id': householdId,
+      'name': name,
+      'recipe': recipe,
+    };
+
+    meals.add(data);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase.from('meals').insert(data);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('meal_add', data);
+    }
+  }
+
+  static Future<void> updateMeal(String id, {String? name, String? recipe}) async {
+    if (householdId == null) return;
+
+    final updates = <String, dynamic>{};
+
+    if (name != null) {
+      updates['name'] = name;
+    }
+
+    if (recipe != null) {
+      updates['recipe'] = recipe;
+    }
+
+    if (updates.isEmpty) return;
+
+    final index = meals.indexWhere((m) => m['id']?.toString() == id);
+
+    if (index != -1) {
+      if (name != null) {
+        meals[index]['name'] = name;
+      }
+
+      if (recipe != null) {
+        meals[index]['recipe'] = recipe;
+      }
+    }
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('meals')
+          .update(updates)
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('meal_update', {'id': id, 'updates': updates});
+    }
+  }
+
+  static Future<void> deleteMeal(String id) async {
+    if (householdId == null) return;
+
+    meals.removeWhere((m) => m['id']?.toString() == id);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('meals')
+          .delete()
+          .eq('id', id)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('meal_delete', {'id': id});
+    }
+  }
+
+  // ============================================================
+  // POLLS
+  // ============================================================
+
+  static Future<void> loadPolls() async {
+    if (householdId == null) return;
+
+    final response = await _supabase
+        .from('polls')
+        .select('*, poll_options(*), poll_votes(*)')
+        .eq('household_id', householdId!)
+        .order('created_at');
+
+    polls.clear();
+    pollOptions.clear();
+    pollVotes.clear();
+
+    for (final row in response) {
+      polls.add(Map<String, dynamic>.from(row));
+
+      for (final option in row['poll_options'] ?? []) {
+        final optionMap = Map<String, dynamic>.from(option);
+        optionMap['poll_id'] = row['id'];
+        pollOptions.add(optionMap);
+      }
+
+      for (final vote in row['poll_votes'] ?? []) {
+        final voteMap = Map<String, dynamic>.from(vote);
+        voteMap['poll_id'] = row['id'];
+        pollVotes.add(voteMap);
+      }
+    }
+  }
+
+  static Future<void> addPoll(String question, List<String> options) async {
+    if (householdId == null || currentMemberId == null) return;
+
+    final pollData = <String, dynamic>{
+      'household_id': householdId,
+      'question': question,
+      'created_by': currentMemberId,
+    };
+
+    final pollResponse = await _supabase
+        .from('polls')
+        .insert(pollData)
+        .select('id')
+        .single();
+
+    final pollId = pollResponse['id'];
+
+    for (final optionText in options) {
+      await _supabase.from('poll_options').insert({
+        'poll_id': pollId,
+        'text': optionText,
+      });
+    }
+
+    await loadPolls();
+
+    _notifyAndCache();
+  }
+
+  static Future<void> votePoll(String pollId, String optionId) async {
+    if (householdId == null || currentMemberId == null) return;
+
+    await _supabase
+        .from('poll_votes')
+        .upsert({
+          'poll_id': pollId,
+          'option_id': optionId,
+          'member_id': currentMemberId,
+        });
+
+    await loadPolls();
+
+    _notifyAndCache();
+  }
+
+  static Future<void> closePoll(String pollId) async {
+    if (householdId == null) return;
+
+    await _supabase
+        .from('polls')
+        .update({'closed': true})
+        .eq('id', pollId)
+        .eq('household_id', householdId!);
+
+    await loadPolls();
+
+    _notifyAndCache();
+  }
+
+  static Future<void> deletePoll(String pollId) async {
+    if (householdId == null) return;
+
+    polls.removeWhere((p) => p['id']?.toString() == pollId);
+    pollOptions.removeWhere((o) => o['poll_id']?.toString() == pollId);
+    pollVotes.removeWhere((v) => v['poll_id']?.toString() == pollId);
+
+    _notifyAndCache();
+
+    try {
+      await _supabase
+          .from('polls')
+          .delete()
+          .eq('id', pollId)
+          .eq('household_id', householdId!);
+
+      _isOnline = true;
+    } catch (error) {
+      _isOnline = false;
+
+      await _queueOperation('poll_delete', {'id': pollId});
+    }
+  }
+
+  // ============================================================
+  // MESSAGE REACTIONS
+  // ============================================================
+
+  static Future<void> loadReactions() async {
+    if (householdId == null) return;
+
+    final messages = await _supabase
+        .from('chat_messages')
+        .select('id')
+        .eq('household_id', householdId!);
+
+    final messageIds = messages.map((m) => m['id']).toList();
+
+    if (messageIds.isEmpty) return;
+
+    final response = await _supabase
+        .from('message_reactions')
+        .select('*')
+        .inFilter('message_id', messageIds);
+
+    for (final row in response) {
+      final messageId = row['message_id']?.toString();
+      final message = chatMessages.firstWhere(
+        (m) => m['id']?.toString() == messageId,
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (message.isEmpty) continue;
+
+      final reactions = message['reactions'] as List<dynamic>? ?? [];
+
+      reactions.add({
+        'member_id': row['member_id'],
+        'emoji': row['emoji'],
+      });
+
+      message['reactions'] = reactions;
+    }
+  }
+
+  static Future<void> toggleReaction(String messageId, String emoji) async {
+    if (householdId == null || currentMemberId == null) return;
+
+    final existing = await _supabase
+        .from('message_reactions')
+        .select('*')
+        .eq('message_id', messageId)
+        .eq('member_id', currentMemberId!)
+        .eq('emoji', emoji)
+        .maybeSingle();
+
+    if (existing != null) {
+      await _supabase
+          .from('message_reactions')
+          .delete()
+          .eq('id', existing['id']);
+    } else {
+      await _supabase.from('message_reactions').insert({
+        'message_id': messageId,
+        'member_id': currentMemberId,
+        'emoji': emoji,
+      });
+    }
+
+    await loadReactions();
+
+    _notifyAndCache();
+  }
+
+  // ============================================================
+  // SEARCH
+  // ============================================================
+
+  static List<Map<String, dynamic>> search(String query) {
+    final lower = query.toLowerCase();
+
+    final results = <Map<String, dynamic>>[];
+
+    for (final task in tasks) {
+      final name = task['name']?.toString() ?? '';
+
+      if (name.toLowerCase().contains(lower)) {
+        results.add(<String, dynamic>{
+          'type': 'task',
+          'title': name,
+          'subtitle': 'Aufgabe',
+          'id': task['id'],
+        });
+      }
+    }
+
+    for (final item in shoppingItems) {
+      final name = item['name']?.toString() ?? '';
+
+      if (name.toLowerCase().contains(lower)) {
+        results.add(<String, dynamic>{
+          'type': 'shopping',
+          'title': name,
+          'subtitle': 'Einkauf',
+          'id': item['id'],
+        });
+      }
+    }
+
+    for (final message in chatMessages) {
+      final text = message['text']?.toString() ?? '';
+
+      if (text.toLowerCase().contains(lower)) {
+        final senderId = message['senderId']?.toString();
+        final sender = senderId == null
+            ? null
+            : WGData.members.firstWhere(
+                (m) => m.id == senderId,
+                orElse: () => WGMember(id: '', name: '', colorIndex: 0),
+              );
+
+        results.add(<String, dynamic>{
+          'type': 'chat',
+          'title': text,
+          'subtitle': sender?.name ?? 'Chat',
+          'id': message['id'],
+        });
+      }
+    }
+
+    for (final expense in expenses) {
+      final description = expense['description']?.toString() ?? '';
+
+      if (description.toLowerCase().contains(lower)) {
+        results.add(<String, dynamic>{
+          'type': 'expense',
+          'title': description,
+          'subtitle': '€${expense['amount']}',
+          'id': expense['id'],
+        });
+      }
+    }
+
+    return results;
   }
 
   // ============================================================

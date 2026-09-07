@@ -163,6 +163,27 @@ CREATE POLICY "Allow all for expenses" ON expenses
 DROP POLICY IF EXISTS "Allow all for expense_categories" ON expense_categories;
 CREATE POLICY "Allow all for expense_categories" ON expense_categories
     FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for chores" ON chores;
+CREATE POLICY "Allow all for chores" ON chores
+    FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for inventory_items" ON inventory_items;
+CREATE POLICY "Allow all for inventory_items" ON inventory_items
+    FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for meals" ON meals;
+CREATE POLICY "Allow all for meals" ON meals
+    FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for polls" ON polls;
+CREATE POLICY "Allow all for polls" ON polls
+    FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for poll_options" ON poll_options;
+CREATE POLICY "Allow all for poll_options" ON poll_options
+    FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for poll_votes" ON poll_votes;
+CREATE POLICY "Allow all for poll_votes" ON poll_votes
+    FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all for message_reactions" ON message_reactions;
+CREATE POLICY "Allow all for message_reactions" ON message_reactions
+    FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================
 -- GRANT TABLE PRIVILEGES TO ANON ROLE
@@ -174,6 +195,124 @@ CREATE POLICY "Allow all for expense_categories" ON expense_categories
 -- ============================================================
 GRANT SELECT, INSERT, UPDATE, DELETE ON expenses TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON expense_categories TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON shopping_items TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tasks TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON chat_messages TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON members TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON households TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON chores TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON inventory_items TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON meals TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON polls TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON poll_options TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON poll_votes TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON message_reactions TO anon;
+
+-- ============================================================
+-- CHORES: Cleaning/rotating chores
+-- ============================================================
+CREATE TABLE IF NOT EXISTS chores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id UUID NOT NULL
+        REFERENCES households(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    frequency TEXT NOT NULL DEFAULT 'weekly',
+    rotation_index INTEGER NOT NULL DEFAULT 0,
+    last_completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS chores_household_id_idx
+    ON chores(household_id);
+
+-- ============================================================
+-- INVENTORY_ITEMS: Household consumables
+-- ============================================================
+CREATE TABLE IF NOT EXISTS inventory_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id UUID NOT NULL
+        REFERENCES households(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    quantity NUMERIC(10,2) NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL DEFAULT 'Stk',
+    min_quantity NUMERIC(10,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS inventory_items_household_id_idx
+    ON inventory_items(household_id);
+
+-- ============================================================
+-- MEALS: Shared meal planner + recipes
+-- ============================================================
+CREATE TABLE IF NOT EXISTS meals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id UUID NOT NULL
+        REFERENCES households(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    recipe TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS meals_household_id_idx
+    ON meals(household_id);
+
+-- ============================================================
+-- POLLS: Simple polls in chat
+-- ============================================================
+CREATE TABLE IF NOT EXISTS polls (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    household_id UUID NOT NULL
+        REFERENCES households(id) ON DELETE CASCADE,
+    question TEXT NOT NULL,
+    created_by UUID
+        REFERENCES members(id) ON DELETE SET NULL,
+    closed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS poll_options (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    poll_id UUID NOT NULL
+        REFERENCES polls(id) ON DELETE CASCADE,
+    text TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    poll_id UUID NOT NULL
+        REFERENCES polls(id) ON DELETE CASCADE,
+    option_id UUID NOT NULL
+        REFERENCES poll_options(id) ON DELETE CASCADE,
+    member_id UUID NOT NULL
+        REFERENCES members(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(poll_id, member_id)
+);
+
+CREATE INDEX IF NOT EXISTS polls_household_id_idx
+    ON polls(household_id);
+CREATE INDEX IF NOT EXISTS poll_options_poll_id_idx
+    ON poll_options(poll_id);
+CREATE INDEX IF NOT EXISTS poll_votes_poll_id_idx
+    ON poll_votes(poll_id);
+
+-- ============================================================
+-- MESSAGE_REACTIONS: Emoji reactions on chat messages
+-- ============================================================
+CREATE TABLE IF NOT EXISTS message_reactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    message_id UUID NOT NULL
+        REFERENCES chat_messages(id) ON DELETE CASCADE,
+    member_id UUID NOT NULL
+        REFERENCES members(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(message_id, member_id, emoji)
+);
+
+CREATE INDEX IF NOT EXISTS message_reactions_message_id_idx
+    ON message_reactions(message_id);
 GRANT SELECT, INSERT, UPDATE, DELETE ON shopping_items TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON tasks TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON chat_messages TO anon;
