@@ -7,6 +7,9 @@ import 'register_page.dart';
 import 'update_alert_dialog.dart';
 import 'version_check_service.dart';
 import 'wg_data.dart';
+import 'search_page.dart';
+import 'rent_split_page.dart';
+import 'polls_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -120,6 +123,30 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
+            'Dashboard',
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Consumer<NotificationPreferences>(
+              builder: (context, prefs, _) {
+                return Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.dashboard_outlined),
+                      title: const Text('Dashboard anpassen'),
+                      subtitle: Text('${prefs.dashboardCards.where((c) => c.isVisible).length}/${prefs.dashboardCards.length} Karten aktiv'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _showDashboardCustomization(context),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
             'WG',
             style: Theme.of(context).textTheme.titleMedium
                 ?.copyWith(fontWeight: FontWeight.bold),
@@ -148,6 +175,57 @@ class SettingsPage extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () =>
                       _showChangeFlatshareConfirmation(context),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Extras',
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.search),
+                  title: const Text('Suche'),
+                  subtitle: const Text('Aufgaben, Chat, Einkäufe'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SearchPage()),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.poll),
+                  title: const Text('Umfragen'),
+                  subtitle: Text('${WGData.polls.length} offen'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PollsPage()),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.house),
+                  title: const Text('Mietanteile'),
+                  subtitle: const Text('Miete berechnen'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const RentSplitPage()),
+                    );
+                  },
                 ),
               ],
             ),
@@ -306,5 +384,125 @@ class SettingsPage extends StatelessWidget {
         );
       },
     );
+  }
+
+  void _showDashboardCustomization(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return Consumer<NotificationPreferences>(
+              builder: (context, prefs, _) {
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Dashboard anpassen',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Text(
+                            '${prefs.dashboardCards.where((c) => c.isVisible).length}/${prefs.dashboardCards.length}',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        'Karten per Drag & Drop umsortieren. Tippen zum Ein-/Ausblenden.',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: ReorderableListView.builder(
+                        scrollController: scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: prefs.dashboardCards.length,
+                        // ignore: deprecated_member_use
+                        onReorder: (oldIndex, newIndex) {
+                          prefs.reorderDashboardCards(oldIndex, newIndex);
+                        },
+                        itemBuilder: (context, index) {
+                          final card = prefs.dashboardCards[index];
+                          return Card(
+                            key: ValueKey(card.id),
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            child: ListTile(
+                              leading: Icon(
+                                _getCardIcon(card.id),
+                                color: card.isVisible
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                              title: Text(
+                                card.name,
+                                style: TextStyle(
+                                  color: card.isVisible
+                                      ? null
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Switch(
+                                    value: card.isVisible,
+                                    onChanged: (value) {
+                                      prefs.toggleDashboardCard(card.id);
+                                    },
+                                  ),
+                                  ReorderableDragStartListener(
+                                    index: index,
+                                    child: const Icon(Icons.drag_handle),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  IconData _getCardIcon(String cardId) {
+    switch (cardId) {
+      case 'shopping':
+        return Icons.shopping_cart;
+      case 'tasks':
+        return Icons.check_circle;
+      case 'chat':
+        return Icons.chat;
+      case 'balance':
+        return Icons.account_balance_wallet;
+      case 'members':
+        return Icons.people;
+      default:
+        return Icons.widgets;
+    }
   }
 }
