@@ -127,6 +127,7 @@ class WGData {
 
     for (final expense in expenses) {
       if (expense['excludeFromBalance'] == true) continue;
+      if (expense['category']?.toString() == 'Ausgleich') continue;
 
       final amount = double.tryParse(
             expense['amount']?.toString() ?? '',
@@ -163,6 +164,7 @@ class WGData {
 
     for (final expense in expenses) {
       if (expense['excludeFromBalance'] == true) continue;
+      if (expense['category']?.toString() == 'Ausgleich') continue;
 
       final paidBy = expense['paidBy']?.toString();
 

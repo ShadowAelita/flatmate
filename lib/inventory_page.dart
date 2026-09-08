@@ -82,6 +82,90 @@ class _InventoryPageState extends State<InventoryPage> {
     }
   }
 
+  Future<void> _editItem(Map<String, dynamic> item) async {
+    final nameController = TextEditingController(text: item['name']?.toString() ?? '');
+    final quantityController = TextEditingController(text: (item['quantity'] as num?)?.toDouble().toStringAsFixed(1) ?? '0');
+    final minController = TextEditingController(text: (item['min_quantity'] as num?)?.toDouble().toStringAsFixed(1) ?? '0');
+    String unit = item['unit']?.toString() ?? 'Stk';
+
+    final units = ['Stk', 'L', 'ml', 'kg', 'g', 'Pack'];
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Artikel bearbeiten'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Artikel'),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: quantityController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Menge'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      DropdownButton<String>(
+                        value: unit,
+                        items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setDialogState(() => unit = value);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: minController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Mindestens'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Abbrechen'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final name = nameController.text.trim();
+                    final quantity = double.tryParse(quantityController.text) ?? 0;
+                    final minQuantity = double.tryParse(minController.text) ?? 0;
+
+                    if (name.isEmpty) return;
+
+                    await WGData.updateInventoryItem(
+                      item['id'].toString(),
+                      quantity: quantity,
+                      minQuantity: minQuantity,
+                    );
+
+                    if (mounted && context.mounted) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                  child: const Text('Speichern'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -160,6 +244,7 @@ class _InventoryPageState extends State<InventoryPage> {
                             ? Colors.red.withValues(alpha: 0.1)
                             : null,
                         child: ListTile(
+                          onTap: () => _editItem(item),
                           title: Text(item['name']?.toString() ?? ''),
                           subtitle: Text(
                             '${quantity.toStringAsFixed(1)} ${item['unit']} · Mindestens ${minQuantity.toStringAsFixed(1)} ${item['unit']}',

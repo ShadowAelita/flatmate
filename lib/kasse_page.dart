@@ -73,7 +73,7 @@ class _KassePageState extends State<KassePage> {
       amount: amount,
       paidBy: isOwed ? otherMember.id : WGData.currentMemberId,
       category: 'Ausgleich',
-      excludeFromBalance: false,
+      excludeFromBalance: true,
     );
 
     if (mounted) {
