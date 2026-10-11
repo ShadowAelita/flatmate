@@ -2186,6 +2186,7 @@ class WGData {
       'claimedBy': row['claimed_by'],
       'addedBy': row['added_by'],
       'note': row['note'],
+      'createdAt': row['created_at'],
     };
   }
 
@@ -2745,6 +2746,7 @@ class WGData {
     if (householdId == null) return;
 
     final id = _newId();
+    final timestamp = DateTime.now().toIso8601String();
 
     final item = {
       'id': id,
@@ -2754,6 +2756,7 @@ class WGData {
       'claimedBy': null,
       'addedBy': addedBy ?? currentMemberId,
       'note': note,
+      'createdAt': timestamp,
     };
 
     shoppingItems.add(item);

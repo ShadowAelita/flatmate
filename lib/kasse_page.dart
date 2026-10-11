@@ -4,6 +4,17 @@ import 'package:flutter/material.dart';
 import 'kasse_stats_page.dart';
 import 'wg_data.dart';
 
+enum TimeFrame {
+  all('Allzeit'),
+  month('Letzter Monat'),
+  threeMonths('Letzte 3 Monate'),
+  sixMonths('Letzte 6 Monate'),
+  year('Letztes Jahr');
+
+  const TimeFrame(this.label);
+  final String label;
+}
+
 class KassePage extends StatefulWidget {
   const KassePage({super.key});
 
@@ -12,6 +23,7 @@ class KassePage extends StatefulWidget {
 }
 
 class _KassePageState extends State<KassePage> {
+  TimeFrame _selectedTimeFrame = TimeFrame.all;
   void _versionChanged() {
     if (mounted) setState(() {});
   }
@@ -100,7 +112,10 @@ class _KassePageState extends State<KassePage> {
     final descriptionController = TextEditingController();
     final amountController = TextEditingController();
     final newCategoryController = TextEditingController();
-    int selectedMemberIndex = 0;
+    int selectedMemberIndex = WGData.members.indexWhere(
+      (m) => m.id == WGData.currentMemberId,
+    );
+    if (selectedMemberIndex == -1) selectedMemberIndex = 0;
     String? selectedCategory;
 
     showModalBottomSheet(
@@ -427,7 +442,11 @@ class _KassePageState extends State<KassePage> {
   }
 
   Widget _buildChartCard(BuildContext context) {
-    final dailyTotals = _groupExpensesByDay(WGData.expenses);
+    final filteredExpenses = _filterExpensesByTimeFrame(
+      WGData.expenses,
+      _selectedTimeFrame,
+    );
+    final dailyTotals = _groupExpensesByDay(filteredExpenses);
 
     if (dailyTotals.isEmpty) {
       return Card(
@@ -436,12 +455,30 @@ class _KassePageState extends State<KassePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Ausgaben über die Zeit',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Ausgaben über die Zeit',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  DropdownButton<TimeFrame>(
+                    value: _selectedTimeFrame,
+                    items: TimeFrame.values
+                        .map((tf) => DropdownMenuItem(value: tf, child: Text(tf.label)))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _selectedTimeFrame = value;
+                        });
+                      }
+                    },
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               SizedBox(
@@ -487,12 +524,30 @@ class _KassePageState extends State<KassePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Ausgaben über die Zeit',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Ausgaben über die Zeit',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                DropdownButton<TimeFrame>(
+                  value: _selectedTimeFrame,
+                  items: TimeFrame.values
+                      .map((tf) => DropdownMenuItem(value: tf, child: Text(tf.label)))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _selectedTimeFrame = value;
+                      });
+                    }
+                  },
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             SizedBox(
@@ -964,6 +1019,38 @@ class _KassePageState extends State<KassePage> {
     }
 
     return result;
+  }
+
+  List<Map<String, dynamic>> _filterExpensesByTimeFrame(
+    List<Map<String, dynamic>> expenses,
+    TimeFrame timeFrame,
+  ) {
+    final now = DateTime.now();
+    DateTime cutoff;
+
+    switch (timeFrame) {
+      case TimeFrame.month:
+        cutoff = DateTime(now.year, now.month - 1, now.day);
+        break;
+      case TimeFrame.threeMonths:
+        cutoff = DateTime(now.year, now.month - 3, now.day);
+        break;
+      case TimeFrame.sixMonths:
+        cutoff = DateTime(now.year, now.month - 6, now.day);
+        break;
+      case TimeFrame.year:
+        cutoff = DateTime(now.year - 1, now.month, now.day);
+        break;
+      case TimeFrame.all:
+        return expenses;
+    }
+
+    return expenses.where((expense) {
+      final createdAt = expense['createdAt']?.toString();
+      if (createdAt == null) return false;
+      final date = DateTime.tryParse(createdAt);
+      return date != null && date.isAfter(cutoff);
+    }).toList();
   }
 
   static String _formatDate(String isoDate) {
