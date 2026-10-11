@@ -2775,6 +2775,7 @@ class WGData {
       'claimed_by': null,
       'added_by': addedBy ?? currentMemberId,
       'note': note,
+      'created_at': timestamp,
     };
 
     try {
