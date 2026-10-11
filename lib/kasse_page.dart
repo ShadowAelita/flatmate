@@ -117,6 +117,7 @@ class _KassePageState extends State<KassePage> {
     );
     if (selectedMemberIndex == -1) selectedMemberIndex = 0;
     String? selectedCategory;
+    DateTime selectedDate = DateTime.now();
 
     showModalBottomSheet(
       context: context,
@@ -169,6 +170,40 @@ class _KassePageState extends State<KassePage> {
                               const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Icon(Icons.calendar_today, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: InkWell(
+                                onTap: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: selectedDate,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                                  );
+                                  if (picked != null) {
+                                    setSheetState(() {
+                                      selectedDate = picked;
+                                    });
+                                  }
+                                },
+                                child: InputDecorator(
+                                  decoration: const InputDecoration(
+                                    labelText: 'Datum',
+                                    hintText: 'Datum wählen',
+                                  ),
+                                  child: Text(
+                                    '${selectedDate.day}.${selectedDate.month}.${selectedDate.year}',
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 16),
                         const Text(
@@ -285,6 +320,7 @@ class _KassePageState extends State<KassePage> {
                               amount: amount,
                               paidBy: paidBy,
                               category: selectedCategory,
+                              createdAt: selectedDate.toIso8601String(),
                             );
 
                             if (context.mounted) {
@@ -854,6 +890,7 @@ class _KassePageState extends State<KassePage> {
      final categories = WGData.allExpenseCategories;
     String? selectedCategory = expense['category']?.toString();
     bool excludeFromBalance = expense['excludeFromBalance'] == true;
+    DateTime selectedDate = DateTime.tryParse(expense['createdAt']?.toString() ?? '') ?? DateTime.now();
 
     if (selectedCategory != null && !categories.contains(selectedCategory)) {
       selectedCategory = null;
@@ -902,6 +939,40 @@ class _KassePageState extends State<KassePage> {
                           const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: selectedDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime.now().add(const Duration(days: 365)),
+                              );
+                              if (picked != null) {
+                                setSheetState(() {
+                                  selectedDate = picked;
+                                });
+                              }
+                            },
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: 'Datum',
+                                hintText: 'Datum wählen',
+                              ),
+                              child: Text(
+                                '${selectedDate.day}.${selectedDate.month}.${selectedDate.year}',
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     if (categories.isNotEmpty) ...[
@@ -957,6 +1028,7 @@ class _KassePageState extends State<KassePage> {
                                 amount: amount,
                                 category: selectedCategory,
                                 excludeFromBalance: excludeFromBalance,
+                                createdAt: selectedDate.toIso8601String(),
                               );
 
                               if (context.mounted) {

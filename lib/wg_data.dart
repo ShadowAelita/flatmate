@@ -2366,11 +2366,14 @@ class WGData {
         .eq('household_id', householdId!)
         .order('created_at');
 
-    shoppingItems.clear();
-
+    final newItems = <Map<String, dynamic>>[];
     for (final row in response) {
-      shoppingItems.add(_shoppingFromRow(row));
+      newItems.add(_shoppingFromRow(row));
     }
+
+    shoppingItems
+      ..clear()
+      ..addAll(newItems);
   }
 
   static Future<void> _loadChatMessages() async {
@@ -2795,11 +2798,12 @@ class WGData {
     String? paidBy,
     String? category,
     bool excludeFromBalance = false,
+    String? createdAt,
   }) async {
     if (householdId == null) return;
 
     final id = _newId();
-    final timestamp = DateTime.now().toIso8601String();
+    final timestamp = createdAt ?? DateTime.now().toIso8601String();
 
     final expense = {
       'id': id,
@@ -2847,6 +2851,7 @@ class WGData {
     String? paidBy,
     String? category,
     bool? excludeFromBalance,
+    String? createdAt,
   }) async {
     if (householdId == null) return;
 
@@ -2881,6 +2886,11 @@ class WGData {
     if (excludeFromBalance != null) {
       expenses[index]['excludeFromBalance'] = excludeFromBalance;
       updates['exclude_from_balance'] = excludeFromBalance;
+    }
+
+    if (createdAt != null) {
+      expenses[index]['createdAt'] = createdAt;
+      updates['created_at'] = createdAt;
     }
 
     if (updates.isEmpty) return;
